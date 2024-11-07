@@ -81,6 +81,58 @@ _ps2add_avx2:
 	vblendvps    xmm0, xmm2, xmm1, xmm3
 	ret
 
+.align 4
+.globl _ps2add_avx
+_ps2add_avx:
+	vbroadcastss xmm8, [rip + mask_rest]
+	vpand        xmm2, xmm8, xmm0
+	vpand        xmm3, xmm8, xmm1
+	vpcmpgtd     xmm3, xmm3, xmm2
+	vpblendvb    xmm6, xmm0, xmm1, xmm3
+	vpblendvb    xmm7, xmm1, xmm0, xmm3
+	vbroadcastss xmm4, [rip + mask_exponent]
+	vpand        xmm0, xmm6, xmm4
+	vpand        xmm1, xmm7, xmm4
+	vbroadcastss xmm4, [rip + const_exp_253]
+	vpcmpgtd     xmm3, xmm0, xmm4
+	vbroadcastss xmm4, [rip + const_exp_2]
+	vpand        xmm3, xmm3, xmm4
+	vpsubd       xmm0, xmm0, xmm1
+	vpsubd       xmm6, xmm6, xmm3
+	vpsubd       xmm7, xmm7, xmm3
+	vpcmpeqd     xmm1, xmm1, xmm1
+	vbroadcastss xmm4, [rip + const_exp_1]
+	vpsubd       xmm4, xmm0, xmm4
+	vpsrld       xmm4, xmm4, 23
+	vpxor        xmm2, xmm2, xmm2
+	vblendps     xmm5, xmm2, xmm4, 1
+	vblendps     xmm4, xmm4, xmm2, 1
+	vpslld       xmm5, xmm1, xmm5
+	vpshufd      xmm2, xmm4, 1
+	vpslld       xmm2, xmm1, xmm2
+	vblendps     xmm5, xmm5, xmm2, 2
+	vpshufd      xmm2, xmm4, 2
+	vpslld       xmm2, xmm1, xmm2
+	vpshufd      xmm4, xmm4, 3
+	vpslld       xmm4, xmm1, xmm4
+	vblendps     xmm5, xmm5, xmm2, 4
+	vblendps     xmm5, xmm5, xmm4, 8
+	vpand        xmm1, xmm5, xmm7
+	vbroadcastss xmm4, [rip + const_exp_1]
+	vpcmpgtd     xmm5, xmm0, xmm4
+	vbroadcastss xmm4, [rip + mask_sign]
+	vpand        xmm4, xmm4, xmm7
+	vpblendvb    xmm7, xmm7, xmm1, xmm5
+	vbroadcastss xmm1, [rip + const_exp_24]
+	vpcmpgtd     xmm0, xmm0, xmm1
+	vpblendvb    xmm7, xmm7, xmm4, xmm0
+	vaddps       xmm0, xmm6, xmm7
+	vorps        xmm1, xmm8, xmm0
+	vpaddd       xmm2, xmm0, xmm3
+	vpxor        xmm3, xmm0, xmm2
+	vblendvps    xmm0, xmm2, xmm1, xmm3
+	ret
+
 .align 5
 mask_sign:
 .int 0x80000000
