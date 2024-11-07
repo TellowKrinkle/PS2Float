@@ -45,9 +45,9 @@ _ps2add_asm:
 .align 4
 .globl _ps2add_avx2
 _ps2add_avx2:
-	vbroadcastss xmm8, [rip + mask_rest]
-	vpand        xmm2, xmm8, xmm0
-	vpand        xmm3, xmm8, xmm1
+	vbroadcastss xmm5, [rip + mask_rest]
+	vpand        xmm2, xmm5, xmm0
+	vpand        xmm3, xmm5, xmm1
 	vpcmpgtd     xmm3, xmm3, xmm2
 	vpblendvb    xmm6, xmm0, xmm1, xmm3
 	vpblendvb    xmm7, xmm1, xmm0, xmm3
@@ -63,19 +63,19 @@ _ps2add_avx2:
 	vpsubd       xmm7, xmm7, xmm3
 	vpcmpeqd     xmm1, xmm1, xmm1
 	vbroadcastss xmm4, [rip + const_exp_1]
-	vpcmpgtd     xmm5, xmm0, xmm4
+	vpcmpgtd     xmm2, xmm0, xmm4
 	vpsubd       xmm4, xmm0, xmm4
 	vpsrld       xmm4, xmm4, 23
 	vpsllvd      xmm1, xmm1, xmm4
 	vpand        xmm1, xmm1, xmm7
 	vbroadcastss xmm4, [rip + mask_sign]
 	vpand        xmm4, xmm4, xmm7
-	vpblendvb    xmm7, xmm7, xmm1, xmm5
+	vpblendvb    xmm7, xmm7, xmm1, xmm2
 	vbroadcastss xmm1, [rip + const_exp_24]
 	vpcmpgtd     xmm0, xmm0, xmm1
 	vpblendvb    xmm7, xmm7, xmm4, xmm0
 	vaddps       xmm0, xmm6, xmm7
-	vorps        xmm1, xmm8, xmm0
+	vorps        xmm1, xmm5, xmm0
 	vpaddd       xmm2, xmm0, xmm3
 	vpxor        xmm3, xmm0, xmm2
 	vblendvps    xmm0, xmm2, xmm1, xmm3
