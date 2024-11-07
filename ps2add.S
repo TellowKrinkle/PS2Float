@@ -133,6 +133,83 @@ _ps2add_avx:
 	vblendvps    xmm0, xmm2, xmm1, xmm3
 	ret
 
+.align 4
+.globl _ps2add_sse4
+_ps2add_sse4:
+	movdqa   xmm6, xmm0
+	movdqa   xmm7, xmm1
+	movdqa   xmm2, [rip + sse_mask_rest]
+	pand     xmm2, xmm0
+	movdqa   xmm0, [rip + sse_mask_rest]
+	pand     xmm0, xmm1
+	pcmpgtd  xmm0, xmm2
+	pblendvb xmm7, xmm6, xmm0
+	pblendvb xmm6, xmm1, xmm0
+	movdqa   xmm0, [rip + sse_mask_exponent]
+	movdqa   xmm1, [rip + sse_mask_exponent]
+	pand     xmm0, xmm6
+	pand     xmm1, xmm7
+	movdqa   xmm3, xmm0
+	pcmpgtd  xmm3, [rip + sse_const_exp_253]
+	pand     xmm3, [rip + sse_const_exp_2]
+	psubd    xmm0, xmm1
+	psubd    xmm6, xmm3
+	psubd    xmm7, xmm3
+	pcmpeqd  xmm4, xmm4
+	paddd    xmm4, xmm0
+	psrld    xmm4, 23
+	pxor     xmm5, xmm5
+	blendps  xmm5, xmm4, 1
+	pxor     xmm2, xmm2
+	blendps  xmm4, xmm2, 1
+	pcmpeqd  xmm1, xmm1
+	pslld    xmm1, xmm5
+	pshufd   xmm5, xmm4, 1
+	pcmpeqd  xmm2, xmm2
+	pslld    xmm2, xmm5
+	blendps  xmm1, xmm2, 2
+	pshufd   xmm5, xmm4, 2
+	pcmpeqd  xmm2, xmm2
+	pslld    xmm2, xmm5
+	blendps  xmm1, xmm2, 4
+	pshufd   xmm5, xmm4, 3
+	pcmpeqd  xmm2, xmm2
+	pslld    xmm2, xmm5
+	blendps  xmm1, xmm2, 8
+	pand     xmm1, xmm7
+	movdqa   xmm2, xmm0
+	pcmpgtd  xmm0, [rip + sse_const_exp_1]
+	movdqa   xmm4, [rip + sse_mask_sign]
+	pand     xmm4, xmm7
+	pblendvb xmm7, xmm1, xmm0
+	movdqa   xmm0, xmm2
+	pcmpgtd  xmm0, [rip + sse_const_exp_24]
+	pblendvb xmm7, xmm4, xmm0
+	addps    xmm6, xmm7
+	movdqa   xmm0, xmm6
+	paddd    xmm3, xmm6
+	orps     xmm6, [rip + sse_mask_rest]
+	pxor     xmm0, xmm3
+	blendvps xmm3, xmm6, xmm0
+	movaps   xmm0, xmm3
+	ret
+
+.align 6
+sse_mask_sign:
+.int 0x80000000, 0x80000000, 0x80000000, 0x80000000
+sse_mask_rest:
+.int 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
+sse_mask_exponent:
+.int 0x7f800000, 0x7f800000, 0x7f800000, 0x7f800000
+sse_const_exp_1:
+.int   1 << 23,   1 << 23,   1 << 23,   1 << 23
+sse_const_exp_2:
+.int   2 << 23,   2 << 23,   2 << 23,   2 << 23
+sse_const_exp_24:
+.int  24 << 23,  24 << 23,  24 << 23,  24 << 23
+sse_const_exp_253:
+.int 253 << 23, 253 << 23, 253 << 23, 253 << 23
+
 .align 5
 mask_sign:
 .int 0x80000000
