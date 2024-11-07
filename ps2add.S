@@ -156,16 +156,16 @@ _ps2add_sse4:
 	psubd    xmm6, xmm3
 	psubd    xmm7, xmm3
 	pcmpeqd  xmm4, xmm4
+	movdqa   xmm1, xmm4
 	paddd    xmm4, xmm0
 	psrld    xmm4, 23
 	pxor     xmm5, xmm5
 	blendps  xmm5, xmm4, 1
 	pxor     xmm2, xmm2
 	blendps  xmm4, xmm2, 1
-	pcmpeqd  xmm1, xmm1
+	movdqa   xmm2, xmm1
 	pslld    xmm1, xmm5
 	pshufd   xmm5, xmm4, 1
-	pcmpeqd  xmm2, xmm2
 	pslld    xmm2, xmm5
 	blendps  xmm1, xmm2, 2
 	pshufd   xmm5, xmm4, 2
