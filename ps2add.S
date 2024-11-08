@@ -84,9 +84,9 @@ _ps2add_avx2:
 .align 4
 .globl _ps2add_avx
 _ps2add_avx:
-	vbroadcastss xmm8, [rip + mask_rest]
-	vpand        xmm2, xmm8, xmm0
-	vpand        xmm3, xmm8, xmm1
+	vbroadcastss xmm5, [rip + mask_rest]
+	vpand        xmm2, xmm5, xmm0
+	vpand        xmm3, xmm5, xmm1
 	vpcmpgtd     xmm3, xmm3, xmm2
 	vpblendvb    xmm6, xmm0, xmm1, xmm3
 	vpblendvb    xmm7, xmm1, xmm0, xmm3
@@ -100,24 +100,12 @@ _ps2add_avx:
 	vpsubd       xmm0, xmm0, xmm1
 	vpsubd       xmm6, xmm6, xmm3
 	vpsubd       xmm7, xmm7, xmm3
-	vpcmpeqd     xmm1, xmm1, xmm1
-	vbroadcastss xmm4, [rip + const_exp_1]
-	vpsubd       xmm4, xmm0, xmm4
-	vpsrld       xmm4, xmm4, 23
+	vbroadcastss xmm4, [rip + const_fp_half]
+	vpaddd       xmm4, xmm4, xmm0
+	vcvttps2dq   xmm4, xmm4
 	vpxor        xmm2, xmm2, xmm2
-	vblendps     xmm5, xmm2, xmm4, 1
-	vblendps     xmm4, xmm4, xmm2, 1
-	vpslld       xmm5, xmm1, xmm5
-	vpshufd      xmm2, xmm4, 1
-	vpslld       xmm2, xmm1, xmm2
-	vblendps     xmm5, xmm5, xmm2, 2
-	vpshufd      xmm2, xmm4, 2
-	vpslld       xmm2, xmm1, xmm2
-	vpshufd      xmm4, xmm4, 3
-	vpslld       xmm4, xmm1, xmm4
-	vblendps     xmm5, xmm5, xmm2, 4
-	vblendps     xmm5, xmm5, xmm4, 8
-	vpand        xmm1, xmm5, xmm7
+	vpsubd       xmm2, xmm2, xmm4
+	vpand        xmm1, xmm2, xmm7
 	vbroadcastss xmm4, [rip + const_exp_1]
 	vpcmpgtd     xmm5, xmm0, xmm4
 	vbroadcastss xmm4, [rip + mask_sign]
@@ -127,7 +115,7 @@ _ps2add_avx:
 	vpcmpgtd     xmm0, xmm0, xmm1
 	vpblendvb    xmm7, xmm7, xmm4, xmm0
 	vaddps       xmm0, xmm6, xmm7
-	vorps        xmm1, xmm8, xmm0
+	vorps        xmm1, xmm5, xmm0
 	vpaddd       xmm2, xmm0, xmm3
 	vpxor        xmm3, xmm0, xmm2
 	vblendvps    xmm0, xmm2, xmm1, xmm3
@@ -155,34 +143,18 @@ _ps2add_sse4:
 	psubd    xmm0, xmm1
 	psubd    xmm6, xmm3
 	psubd    xmm7, xmm3
-	pcmpeqd  xmm4, xmm4
-	movdqa   xmm1, xmm4
-	paddd    xmm4, xmm0
-	psrld    xmm4, 23
-	pxor     xmm5, xmm5
-	blendps  xmm5, xmm4, 1
-	pxor     xmm2, xmm2
-	blendps  xmm4, xmm2, 1
-	movdqa   xmm2, xmm1
-	pslld    xmm1, xmm5
-	pshufd   xmm5, xmm4, 1
-	pslld    xmm2, xmm5
-	blendps  xmm1, xmm2, 2
-	pshufd   xmm5, xmm4, 2
-	pcmpeqd  xmm2, xmm2
-	pslld    xmm2, xmm5
-	blendps  xmm1, xmm2, 4
-	pshufd   xmm5, xmm4, 3
-	pcmpeqd  xmm2, xmm2
-	pslld    xmm2, xmm5
-	blendps  xmm1, xmm2, 8
+	movdqa   xmm5, xmm0
+	movdqa   xmm2, [rip + sse_const_fp_half]
+	paddd    xmm2, xmm0
+	cvttps2dq xmm2, xmm2
+	pxor     xmm1, xmm1
+	psubd    xmm1, xmm2
 	pand     xmm1, xmm7
-	movdqa   xmm2, xmm0
 	pcmpgtd  xmm0, [rip + sse_const_exp_1]
 	movdqa   xmm4, [rip + sse_mask_sign]
 	pand     xmm4, xmm7
 	pblendvb xmm7, xmm1, xmm0
-	movdqa   xmm0, xmm2
+	movdqa   xmm0, xmm5
 	pcmpgtd  xmm0, [rip + sse_const_exp_24]
 	pblendvb xmm7, xmm4, xmm0
 	addps    xmm6, xmm7
@@ -201,6 +173,8 @@ sse_mask_rest:
 .int 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
 sse_mask_exponent:
 .int 0x7f800000, 0x7f800000, 0x7f800000, 0x7f800000
+sse_const_fp_half:
+.int 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000
 sse_const_exp_1:
 .int   1 << 23,   1 << 23,   1 << 23,   1 << 23
 sse_const_exp_2:
@@ -217,6 +191,8 @@ mask_rest:
 .int 0x7fffffff
 mask_exponent:
 .int 0x7f800000
+const_fp_half:
+.int 0x3f000000
 const_exp_1:
 .int 1 << 23
 const_exp_2:
