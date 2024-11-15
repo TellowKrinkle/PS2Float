@@ -34,7 +34,7 @@ u32 ps2add(u32 a, u32 b) {
 	u32 adjusted = res + adjust;
 	if (static_cast<s32>(adjusted ^ res) < 0) // Did adding the adjustment overflow?
 		res |= 0x7fffffff;
-	else
+	else if (res)
 		res = adjusted;
 	return res;
 }
