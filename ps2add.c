@@ -44,6 +44,16 @@ u32 ps2sub(u32 a, u32 b) {
 }
 
 int main(int argc, const char * argv[]) {
+#if defined(FE_DFL_DISABLE_SSE_DENORMS_ENV)
+	fesetenv(FE_DFL_DISABLE_SSE_DENORMS_ENV);
+#elif defined(FE_DFL_DISABLE_DENORMS_ENV)
+	fesetenv(FE_DFL_DISABLE_DENORMS_ENV);
+#elif defined(__x86_64__)
+	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#else
+	#warning Can't disable denormals
+#endif
 	fesetround(FE_TOWARDZERO);
 	printf("%08x\n", ps2sub(0x3f800000, 0x3cf776f9));
 	printf("%08x\n", ps2add(0x7f7fffff, 0x7fffffff));
