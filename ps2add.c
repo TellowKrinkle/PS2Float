@@ -6,13 +6,17 @@
 #pragma STDC FENV_ACCESS ON
 
 typedef uint8_t u8;
+typedef uint16_t u16;
 typedef uint32_t u32;
 typedef  int32_t s32;
+typedef  int16_t s16;
 
 #ifdef __x86_64__
 #include <immintrin.h>
 extern "C" u32 ps2add_asm(u32 a, u32 b);
 extern "C" __m128i ps2add_avx2(__m128i a, __m128i b);
+extern "C" __m128i ps2add_avx(__m128i a, __m128i b);
+extern "C" __m128i ps2add_sse4(__m128i a, __m128i b);
 #endif
 
 u32 ps2add(u32 a, u32 b) {
@@ -43,6 +47,47 @@ u32 ps2sub(u32 a, u32 b) {
 	return ps2add(a, b ^ 0x80000000);
 }
 
+static constexpr struct Test {
+	uint32_t a;
+	uint32_t b;
+	uint32_t c;
+} tests[] = {
+	{ 0x3f800000, 0xbcf776f9, 0x3f784449 },
+	{ 0x7f7fffff, 0x7fffffff, 0x7fffffff },
+	{ 0x7ffddddd, 0xb4480000, 0x7ffddddd },
+	{ 0x7ffddddd, 0xff800000, 0x7f7bbbba },
+	{ 0xf4800000, 0x7ffddddd, 0x7ffddddb },
+	{ 0x7ffddddd, 0x7ffddddd, 0x7fffffff },
+};
+
+static void run_tests(u32(*fn)(u32, u32), const char* name) {
+	for (const Test& test : tests) {
+		uint32_t res = fn(test.a, test.b);
+		if (res == test.c)
+			printf("%08x + %08x =[%s] %08x\n", test.a, test.b, name, res);
+		else
+			printf("%08x + %08x =[%s] %08x != %08x\n", test.a, test.b, name, res, test.c);
+	}
+}
+
+#ifdef __x86_64__
+static void run_tests(__m128i(*fn)(__m128i, __m128i), const char* name) {
+	for (const Test& test : tests) {
+		__m128i a = _mm_set1_epi32(test.a);
+		__m128i b = _mm_set1_epi32(test.b);
+		__m128i res = fn(a, b);
+		u16 alleq = ~_mm_movemask_epi8(_mm_cmpeq_epi32(res, _mm_shuffle_epi32(res, 0)));
+		u32 res32 = _mm_cvtsi128_si32(res);
+		if (alleq != 0)
+			printf("Not all vectors matched when testing %08x + %08x\n", test.a, test.b);
+		else if (res32 == test.c)
+			printf("%08x + %08x =[%s] %08x\n", test.a, test.b, name, res32);
+		else
+			printf("%08x + %08x =[%s] %08x != %08x\n", test.a, test.b, name, res32, test.c);
+	}
+}
+#endif
+
 int main(int argc, const char * argv[]) {
 #if defined(FE_DFL_DISABLE_SSE_DENORMS_ENV)
 	fesetenv(FE_DFL_DISABLE_SSE_DENORMS_ENV);
@@ -55,22 +100,13 @@ int main(int argc, const char * argv[]) {
 	#warning Can't disable denormals
 #endif
 	fesetround(FE_TOWARDZERO);
-	printf("%08x\n", ps2sub(0x3f800000, 0x3cf776f9));
-	printf("%08x\n", ps2add(0x7f7fffff, 0x7fffffff));
-	printf("%08x\n", ps2sub(0x7ffddddd, 0x34480000));
-	printf("%08x\n", ps2sub(0x7ffddddd, 0x7f800000));
-	printf("%08x\n", ps2add(0xf4800000, 0x7ffddddd));
-	printf("%08x\n", ps2add(0x7ffddddd, 0x7ffddddd));
+	run_tests(ps2add, "C");
 
 #ifdef __x86_64__
-	__m128i res = ps2add_avx2(
-		_mm_setr_epi32(0x3f800000, 0x7ffddddd, 0xf4800000, 0x7ffddddd),
-		_mm_setr_epi32(0xbcf776f9, 0xff800000, 0x7ffddddd, 0x7ffddddd));
-	printf("\n");
-	printf("%08x\n", _mm_extract_epi32(res, 0));
-	printf("%08x\n", _mm_extract_epi32(res, 1));
-	printf("%08x\n", _mm_extract_epi32(res, 2));
-	printf("%08x\n", _mm_extract_epi32(res, 3));
+	run_tests(ps2add_asm, "ASM");
+	run_tests(ps2add_avx2, "AVX2");
+	run_tests(ps2add_avx,  "AVX");
+	run_tests(ps2add_sse4, "SSE4");
 #endif
 	return 0;
 }
