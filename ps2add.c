@@ -59,26 +59,41 @@ static constexpr struct Test {
 	{ 0xf4800000, 0x7ffddddd, 0x7ffddddb },
 	{ 0x7ffddddd, 0x7ffddddd, 0x7fffffff },
 	{ 0x7fffffff, 0xffffffff, 0x00000000 },
+	{ 0x80000000, 0x80000000, 0x80000000 },
+	{ 0x80000000, 0x00000000, 0x00000000 },
+	{ 0x00000000, 0x80000000, 0x00000000 },
+	{ 0x007fffff, 0x007fffff, 0x00000000 },
+	{ 0x807fffff, 0x807fffff, 0x80000000 },
+	{ 0x807fffff, 0x00000001, 0x00000000 },
+	{ 0x0c800000, 0x8c7fffff, 0x00800000 },
+	{ 0x0c000000, 0x8bffffff, 0x00000000 },
+	{ 0x0c7fffff, 0x8c800000, 0x80800000 },
+	{ 0x0bffffff, 0x8c000000, 0x80000000 },
 };
 
-static void run_tests(u32(*fn)(u32, u32), const char* name) {
+static bool run_tests(u32(*fn)(u32, u32), const char* name) {
+	bool ok = true;
 	for (const Test& test : tests) {
 		uint32_t res = fn(test.a, test.b);
+		ok &= res == test.c;
 		if (res == test.c)
 			printf("%08x + %08x =[%s] %08x\n", test.a, test.b, name, res);
 		else
 			printf("%08x + %08x =[%s] %08x != %08x\n", test.a, test.b, name, res, test.c);
 	}
+	return ok;
 }
 
 #ifdef __x86_64__
-static void run_tests(__m128i(*fn)(__m128i, __m128i), const char* name) {
+static bool run_tests(__m128i(*fn)(__m128i, __m128i), const char* name) {
+	bool ok = true;
 	for (const Test& test : tests) {
 		__m128i a = _mm_set1_epi32(test.a);
 		__m128i b = _mm_set1_epi32(test.b);
 		__m128i res = fn(a, b);
 		u16 alleq = ~_mm_movemask_epi8(_mm_cmpeq_epi32(res, _mm_shuffle_epi32(res, 0)));
 		u32 res32 = _mm_cvtsi128_si32(res);
+		ok &= alleq == 0 && res32 == test.c;
 		if (alleq != 0)
 			printf("Not all vectors matched when testing %08x + %08x\n", test.a, test.b);
 		else if (res32 == test.c)
@@ -86,6 +101,7 @@ static void run_tests(__m128i(*fn)(__m128i, __m128i), const char* name) {
 		else
 			printf("%08x + %08x =[%s] %08x != %08x\n", test.a, test.b, name, res32, test.c);
 	}
+	return ok;
 }
 #endif
 
@@ -101,13 +117,16 @@ int main(int argc, const char * argv[]) {
 	#warning Can't disable denormals
 #endif
 	fesetround(FE_TOWARDZERO);
-	run_tests(ps2add, "C");
+	bool ok = true;
+	ok &= run_tests(ps2add, "C");
 
 #ifdef __x86_64__
-	run_tests(ps2add_asm, "ASM");
-	run_tests(ps2add_avx2, "AVX2");
-	run_tests(ps2add_avx,  "AVX");
-	run_tests(ps2add_sse4, "SSE4");
+	ok &= run_tests(ps2add_asm, "ASM");
+	ok &= run_tests(ps2add_avx2, "AVX2");
+	ok &= run_tests(ps2add_avx,  "AVX");
+	ok &= run_tests(ps2add_sse4, "SSE4");
 #endif
-	return 0;
+	if (ok)
+		puts("All Pass");
+	return ok ? 0 : 1;
 }
