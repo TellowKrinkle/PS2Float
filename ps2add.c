@@ -58,6 +58,7 @@ static constexpr struct Test {
 	{ 0x7ffddddd, 0xff800000, 0x7f7bbbba },
 	{ 0xf4800000, 0x7ffddddd, 0x7ffddddb },
 	{ 0x7ffddddd, 0x7ffddddd, 0x7fffffff },
+	{ 0x7fffffff, 0xffffffff, 0x00000000 },
 };
 
 static void run_tests(u32(*fn)(u32, u32), const char* name) {

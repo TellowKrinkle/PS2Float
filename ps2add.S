@@ -43,8 +43,11 @@ GNAME(ps2add_asm):
 	addss  xmm0, xmm1
 	movd   eax, xmm0       # rax = a * b
 	or     r8d, eax        # r8d = rax | 0x7fffffff
+	mov    ecx, eax        # ecx = eax
 	add    eax, edx        # eax += adjust
 	cmovo  eax, r8d        # if (overflow) eax = r8d
+	test   ecx, ecx        # if (!ecx)
+	cmovz  eax, ecx        #   eax = ecx
 	ret
 
 .align 4
@@ -80,10 +83,13 @@ GNAME(ps2add_avx2):
 	vpcmpgtd     xmm0, xmm0, xmm1            # xmm0 = shift > 24
 	vpblendvb    xmm7, xmm7, xmm4, xmm0      # if (shift > 24) xmm7 = min(a, b) & 0x80000000
 	vaddps       xmm0, xmm6, xmm7            # xmm0 = res = a + b
+	vpxor        xmm4, xmm4, xmm4            # xmm4 = 0
+	vpcmpeqd     xmm4, xmm4, xmm0            # xmm4 = res == 0
 	vorps        xmm1, xmm5, xmm0            # xmm1 = res | 0x7fffffff
 	vpaddd       xmm2, xmm0, xmm3            # xmm2 = res + adjust
 	vpxor        xmm3, xmm0, xmm2            # xmm3 = res ^ (res + adjust)
 	vblendvps    xmm0, xmm2, xmm1, xmm3      # xmm0 = (xmm3 & 0x80000000) ? xmm1 : xmm2
+	vpandn       xmm0, xmm4, xmm0            # if (res == 0) xmm4 = 0
 	ret
 
 .align 4
@@ -120,10 +126,13 @@ GNAME(ps2add_avx):
 	vpcmpgtd     xmm0, xmm0, xmm1            # xmm0 = shift > 24
 	vpblendvb    xmm7, xmm7, xmm4, xmm0      # if (shift > 24) xmm7 = min(a, b) & 0x80000000
 	vaddps       xmm0, xmm6, xmm7            # xmm0 = res = a + b
+	vpxor        xmm4, xmm4, xmm4            # xmm4 = 0
+	vpcmpeqd     xmm4, xmm4, xmm0            # xmm4 = res == 0
 	vorps        xmm1, xmm5, xmm0            # xmm1 = res | 0x7fffffff
 	vpaddd       xmm2, xmm0, xmm3            # xmm2 = res + adjust
 	vpxor        xmm3, xmm0, xmm2            # xmm3 = res ^ (res + adjust)
 	vblendvps    xmm0, xmm2, xmm1, xmm3      # xmm0 = (xmm3 & 0x80000000) ? xmm1 : xmm2
+	vpandn       xmm0, xmm4, xmm0            # if (res == 0) xmm0 = 0
 	ret
 
 .align 4
@@ -165,10 +174,13 @@ GNAME(ps2add_sse4):
 	addps    xmm6, xmm7                      # xmm6 = res = a + b
 	movdqa   xmm0, xmm6
 	paddd    xmm3, xmm6                      # xmm3 = res + adjust
-	orps     xmm6, [rip + sse_mask_rest]     # xmm6 |= 0x7fffffff
+	movdqa   xmm4, [rip + sse_mask_rest]
+	orps     xmm4, xmm6                      # xmm4 = res | 0x7fffffff
 	pxor     xmm0, xmm3                      # xmm0 = res ^ (res + adjust)
-	blendvps xmm3, xmm6, xmm0                # xmm3 = (xmm0 ^ 0x80000000) ? xmm3 : xmm6
-	movaps   xmm0, xmm3                      # xmm0 = xmm3
+	blendvps xmm3, xmm4, xmm0                # xmm3 = (xmm0 ^ 0x80000000) ? xmm3 : xmm6
+	pxor     xmm0, xmm0                      # xmm0 = 0
+	pcmpeqd  xmm0, xmm6                      # xmm0 = res == 0
+	pandn    xmm0, xmm3                      # xmm0 = res == 0 ? 0 : xmm3
 	ret
 
 .align 6
