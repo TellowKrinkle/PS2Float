@@ -174,7 +174,7 @@ GNAME(ps2add_sse4):
 	addps    xmm6, xmm7                      # xmm6 = res = a + b
 	movdqa   xmm0, xmm6
 	paddd    xmm3, xmm6                      # xmm3 = res + adjust
-	movdqa   xmm4, [rip + sse_mask_rest]
+	movaps   xmm4, [rip + sse_mask_rest]
 	orps     xmm4, xmm6                      # xmm4 = res | 0x7fffffff
 	pxor     xmm0, xmm3                      # xmm0 = res ^ (res + adjust)
 	blendvps xmm3, xmm4, xmm0                # xmm3 = (xmm0 ^ 0x80000000) ? xmm3 : xmm6
