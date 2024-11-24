@@ -1,8 +1,13 @@
 .intel_syntax
+#ifdef __APPLE__
+#define GNAME(x) _##x
+#else
+#define GNAME(x) x
+#endif
 
 .align 4
-.globl _ps2add_asm
-_ps2add_asm:
+.globl GNAME(ps2add_asm)
+GNAME(ps2add_asm):
 	mov    r8d, 0x7fffffff # r8d = 0x7fffffff
 	mov    eax, edi
 	mov    edx, esi
@@ -43,8 +48,8 @@ _ps2add_asm:
 	ret
 
 .align 4
-.globl _ps2add_avx2
-_ps2add_avx2:
+.globl GNAME(ps2add_avx2)
+GNAME(ps2add_avx2):
 	vbroadcastss xmm5, [rip + mask_rest]
 	vpand        xmm2, xmm5, xmm0
 	vpand        xmm3, xmm5, xmm1
@@ -82,8 +87,8 @@ _ps2add_avx2:
 	ret
 
 .align 4
-.globl _ps2add_avx
-_ps2add_avx:
+.globl GNAME(ps2add_avx)
+GNAME(ps2add_avx):
 	vbroadcastss xmm5, [rip + mask_rest]
 	vpand        xmm2, xmm5, xmm0
 	vpand        xmm3, xmm5, xmm1
@@ -122,8 +127,8 @@ _ps2add_avx:
 	ret
 
 .align 4
-.globl _ps2add_sse4
-_ps2add_sse4:
+.globl GNAME(ps2add_sse4)
+GNAME(ps2add_sse4):
 	movdqa   xmm6, xmm0
 	movdqa   xmm7, xmm1
 	movdqa   xmm2, [rip + sse_mask_rest]
