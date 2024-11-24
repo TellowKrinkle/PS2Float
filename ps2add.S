@@ -112,10 +112,10 @@ GNAME(ps2add_avx):
 	vpsubd       xmm2, xmm2, xmm4            # xmm2 = -xmm4 (converts 1 << x to ~0u << x)
 	vpand        xmm1, xmm2, xmm7            # xmm1 = xmm7 & (~0u << (shift - 1))
 	vbroadcastss xmm4, [rip + const_exp_1]   # xmm4 = 1 << 23
-	vpcmpgtd     xmm5, xmm0, xmm4            # xmm5 = shift > 1
+	vpcmpgtd     xmm2, xmm0, xmm4            # xmm2 = shift > 1
 	vbroadcastss xmm4, [rip + mask_sign]     # xmm4 = 0x80000000
 	vpand        xmm4, xmm4, xmm7            # xmm4 = xmm7 & 0x80000000
-	vpblendvb    xmm7, xmm7, xmm1, xmm5      # if (shift > 1) xmm7 &= (~0u << (shift - 1))
+	vpblendvb    xmm7, xmm7, xmm1, xmm2      # if (shift > 1) xmm7 &= (~0u << (shift - 1))
 	vbroadcastss xmm1, [rip + const_exp_24]  # xmm1 = 24 << 23
 	vpcmpgtd     xmm0, xmm0, xmm1            # xmm0 = shift > 24
 	vpblendvb    xmm7, xmm7, xmm4, xmm0      # if (shift > 24) xmm7 = min(a, b) & 0x80000000
