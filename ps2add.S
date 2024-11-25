@@ -5,7 +5,7 @@
 #define GNAME(x) x
 #endif
 
-.align 4
+.balign 16
 .globl GNAME(ps2add_asm)
 GNAME(ps2add_asm):
 	mov    r8d, 0x7fffffff # r8d = 0x7fffffff
@@ -50,7 +50,7 @@ GNAME(ps2add_asm):
 	cmovz  eax, ecx        #   eax = ecx
 	ret
 
-.align 4
+.balign 16
 .globl GNAME(ps2add_avx2)
 GNAME(ps2add_avx2):
 	vbroadcastss xmm5, [rip + mask_rest]     # xmm5 = 0x7fffffff
@@ -92,7 +92,7 @@ GNAME(ps2add_avx2):
 	vpandn       xmm0, xmm4, xmm0            # if (res == 0) xmm4 = 0
 	ret
 
-.align 4
+.balign 16
 .globl GNAME(ps2add_avx)
 GNAME(ps2add_avx):
 	vbroadcastss xmm5, [rip + mask_rest]     # xmm5 = 0x7fffffff
@@ -135,7 +135,7 @@ GNAME(ps2add_avx):
 	vpandn       xmm0, xmm4, xmm0            # if (res == 0) xmm0 = 0
 	ret
 
-.align 4
+.balign 16
 .globl GNAME(ps2add_sse4)
 GNAME(ps2add_sse4):
 	movdqa   xmm6, xmm0
@@ -183,7 +183,7 @@ GNAME(ps2add_sse4):
 	pandn    xmm0, xmm3                      # xmm0 = res == 0 ? 0 : xmm3
 	ret
 
-.align 6
+.balign 64
 sse_mask_sign:
 .int 0x80000000, 0x80000000, 0x80000000, 0x80000000
 sse_mask_rest:
@@ -201,7 +201,7 @@ sse_const_exp_24:
 sse_const_exp_253:
 .int 253 << 23, 253 << 23, 253 << 23, 253 << 23
 
-.align 5
+.balign 32
 mask_sign:
 .int 0x80000000
 mask_rest:
