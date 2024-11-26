@@ -17,6 +17,7 @@ extern "C" u32 ps2add_asm(u32 a, u32 b);
 extern "C" __m128i ps2add_avx2(__m128i a, __m128i b);
 extern "C" __m128i ps2add_avx(__m128i a, __m128i b);
 extern "C" __m128i ps2add_sse4(__m128i a, __m128i b);
+extern "C" u32 ps2add_int_asm(u32 a, u32 b);
 #endif
 
 u32 ps2add(u32 a, u32 b) {
@@ -159,6 +160,7 @@ int main(int argc, const char * argv[]) {
 	ok &= run_tests(ps2add_avx2, "AVX2");
 	ok &= run_tests(ps2add_avx,  "AVX");
 	ok &= run_tests(ps2add_sse4, "SSE4");
+	ok &= run_tests(ps2add_int_asm, "ASMI");
 #endif
 	if (ok)
 		puts("All Pass");

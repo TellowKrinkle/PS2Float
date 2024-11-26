@@ -183,6 +183,76 @@ GNAME(ps2add_sse4):
 	pandn    xmm0, xmm3                      // xmm0 = res == 0 ? 0 : xmm3
 	ret
 
+.balign 16
+.globl GNAME(ps2add_int_asm)
+GNAME(ps2add_int_asm):
+	mov    r11d, 0x7fffffff
+	mov    eax, edi
+	mov    edx, esi
+	and    eax, r11d        // eax = a & 0x7fffffff
+	and    edx, r11d        // edx = b & 0x7fffffff
+	mov    ecx, edi
+	cmp    eax, edx         // if (eax < edx)
+	cmovb  edi, esi         //   swap esi, edi
+	cmovb  esi, ecx
+	mov    eax,  0x7fffff
+	mov    edx, esi
+	and    edx, eax
+	or     edx, 0x800000
+	shl    edx, 1           // edx = bmant = ((b & 0x7fffff) | 0x800000) << 1
+	mov    ecx, edi
+	shr    ecx, 23          // ecx = a >> 23
+	mov    r8d, esi
+	shr    r8d, 23          // r8d = b >> 23
+	mov    r9d, ecx         // r9d = a >> 23
+	sub    ecx, r8d         // cl = shift = (a >> 23) - (b >> 23)
+	sar    edx, cl          // bmant >>= shift
+	xor    r10d, r10d
+	cmp    cl, 23
+	cmovae edx, r10d        // if (shift > 24) bmant = 0
+	mov    ecx, edi
+	xor    ecx, esi
+	sar    ecx, 31          // eax = negate = static_cast<s32>(a ^ b) >> 31
+	xor    edx, ecx
+	sub    edx, ecx         // if (negate) edx = -edx
+	and    eax, edi
+	or     eax, 0x800000
+	shl    eax, 1           // eax = amant = ((a & 0x7fffff) | 0x800000) << 1
+	add    eax, edx         // amant += bmant
+	bsr    edx, eax
+	mov    ecx, edx
+	xor    ecx, 31          // ecx = clz(amant)
+	shl    eax, cl          // amant <<= clz(amant)
+	shr    eax, 8           // amant >>= 31 - 23
+	and    eax, 0x7fffff    // eax = amant & 0x7fffff
+	sub    edx, 24          // edx = 7 - clz(amant)
+	movzx  ecx, r9b         // ecx = aexp = ((a >> 23) & 0xff)
+	or     r11d, edi
+	mov    r10d, edi        // r11d = a | 0x7fffffff
+	and    r10d, 0x80000000 // r10d = a & 0x80000000
+	or     eax, r10d        // eax = (a & 0x80000000) | (amant & 0x7fffff)
+	cmp    ecx, 32
+	cmovl  r11d, r10d       // r11d = aexp < 32 ? a & 0x80000000 : a | 0x7fffffff
+	and    r10d, esi        // r10d = a & b & 0x80000000
+	test   ecx, ecx
+	cmovnz r10d, edi        // r10d = aexp ? a : a & b & 0x80000000
+	add    ecx, edx         // ecx = cexp = aexp + (7 - clz(amant))
+	xor    edx, edx
+	xor    esi, 0x80000000  // esi = b ^ 0x80000000
+	cmp    edi, esi
+	cmove  r11d, edx        // if (a == (b ^ 0x80000000)) r11d = 0
+	sete   dl               // dl = a == (b ^ 0x80000000)
+	test   r8b, r8b
+	cmovz  r11d, r10d       // if (!bexp) r11d = r9d
+	setz   r9b              // d9b = !bexp
+	or     dl, r9b          // dl = !bexp || a == (b ^ 0x80000000)
+	or     dl, ch           // dl = any special case
+	shl    ecx, 23
+	or     eax, ecx         // eax = (a & 0x80000000) | (cexp << 23) | (amant & 0x7fffff)
+	test   dl, dl
+	cmovnz eax, r11d        // if (any special case) eax = r11d
+	ret
+
 .balign 64
 sse_mask_sign:
 .int 0x80000000, 0x80000000, 0x80000000, 0x80000000
