@@ -43,6 +43,39 @@ u32 ps2add(u32 a, u32 b) {
 	return res;
 }
 
+/// ps2add without using fp adder and relying on setting ftz, daz, and round towards zero
+u32 ps2add_int(u32 a, u32 b) {
+	static constexpr u32 SIGN = 0x80000000;
+	if ((a & 0x7fffffff) < (b & 0x7fffffff))
+		std::swap(a, b); // Make a the larger of the two
+	u8 aexp = ((a >> 23) & 0xff);
+	u8 bexp = ((b >> 23) & 0xff);
+	if (!bexp)
+		return aexp ? a : a & b & SIGN;
+	if (a == (b ^ SIGN))
+		return 0;
+	u8 shift = aexp - bexp;
+	u32 amant = ((a & 0x7fffff) | 0x800000) << 1;
+	u32 bmant = ((b & 0x7fffff) | 0x800000) << 1;
+	if (shift > 24)
+		bmant = 0;
+	else
+		bmant >>= shift;
+	s32 negate = static_cast<s32>(a ^ b) >> 31;
+	bmant ^= negate;
+	bmant -= negate; // Conditionally negate b if it's the opposite sign of a
+	amant += bmant;
+	u32 lz = __builtin_clz(amant);
+	amant <<= lz;
+	amant >>= 31 - 23;
+	s32 cexp = aexp + (7 - lz);
+	if (cexp <= 0)
+		return a & SIGN;
+	if (cexp > 255)
+		return a | 0x7fffffff;
+	return (a & SIGN) | (cexp << 23) | (amant & 0x7fffff);
+}
+
 u32 ps2sub(u32 a, u32 b) {
 	return ps2add(a, b ^ 0x80000000);
 }
@@ -118,7 +151,8 @@ int main(int argc, const char * argv[]) {
 #endif
 	fesetround(FE_TOWARDZERO);
 	bool ok = true;
-	ok &= run_tests(ps2add, "C");
+	ok &= run_tests(ps2add, "CF");
+	ok &= run_tests(ps2add_int, "CI");
 
 #ifdef __x86_64__
 	ok &= run_tests(ps2add_asm, "ASM");
