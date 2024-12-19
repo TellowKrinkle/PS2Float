@@ -1,3 +1,5 @@
+#ifdef __x86_64__
+
 .intel_syntax
 #ifdef __APPLE__
 #define GNAME(x) _##x
@@ -288,3 +290,5 @@ const_exp_24:
 .int 24 << 23
 const_exp_253:
 .int 253 << 23
+
+#endif // __x86_64__
