@@ -84,8 +84,13 @@ static void setup_fenv() {
 #elif defined(__x86_64__)
 	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#elif defined(__aarch64__)
+	u32 fpcr;
+	asm volatile("mrs %x[fpcr], FPCR" : [fpcr]"=r"(fpcr));
+	fpcr |= 1 << 24;
+	asm volatile("msr FPCR, %x[fpcr]" :: [fpcr]"r"(fpcr));
 #else
-	#warning Can't disable denormals
+	#warning "Can't disable denormals"
 #endif
 	fesetround(FE_TOWARDZERO);
 }
