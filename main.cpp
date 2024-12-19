@@ -33,6 +33,9 @@ static constexpr Test TESTS_ADD[] = {
 	{ 0x0c000000, 0x8bffffff, 0x00000000 },
 	{ 0x0c7fffff, 0x8c800000, 0x80800000 },
 	{ 0x0bffffff, 0x8c000000, 0x80000000 },
+	{ 0x3f800000, 0x9d19cd52, 0x3f800000 },
+	{ 0x3f800000, 0xb3abd455, 0x3f7fffff },
+	{ 0x3f800002, 0xb3800000, 0x3f800001 },
 };
 
 static bool run_tests(u32(*fn)(u32, u32), const char* name, bool printSuccess) {

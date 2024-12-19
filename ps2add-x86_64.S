@@ -210,7 +210,7 @@ GNAME(ps2add_int_asm):
 	sub    ecx, r8d         // cl = shift = (a >> 23) - (b >> 23)
 	sar    edx, cl          // bmant >>= shift
 	xor    r10d, r10d
-	cmp    cl, 23
+	cmp    cl, 25
 	cmovae edx, r10d        // if (shift > 24) bmant = 0
 	mov    ecx, edi
 	xor    ecx, esi
