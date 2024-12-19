@@ -1,6 +1,7 @@
 #ifdef __x86_64__
 
 .intel_syntax
+.text
 #ifdef __APPLE__
 #define GNAME(x) _##x
 #else
@@ -197,7 +198,7 @@ GNAME(ps2add_int_asm):
 	cmp    eax, edx         // if (eax < edx)
 	cmovb  edi, esi         //   swap esi, edi
 	cmovb  esi, ecx
-	mov    eax,  0x7fffff
+	mov    eax, 0x7fffff
 	mov    edx, esi
 	and    edx, eax
 	or     edx, 0x800000
@@ -255,6 +256,7 @@ GNAME(ps2add_int_asm):
 	cmovnz eax, r11d        // if (any special case) eax = r11d
 	ret
 
+.data
 .balign 64
 sse_mask_sign:
 .int 0x80000000, 0x80000000, 0x80000000, 0x80000000
