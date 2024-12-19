@@ -256,6 +256,61 @@ GNAME(ps2add_int_asm):
 	cmovnz eax, r11d        // if (any special case) eax = r11d
 	ret
 
+.balign 16
+.globl GNAME(ps2add_int_avx)
+GNAME(ps2add_int_avx):
+	vbroadcastss xmm9, [rip + mask_sign]     // xmm4 = 0x80000000
+	vpxor        xmm2, xmm0, xmm1            // xmm2 = a ^ b
+	vpandn       xmm5, xmm9, xmm0            // xmm5 = a & 0x7fffffff
+	vpandn       xmm3, xmm9, xmm1            // xmm3 = b & 0x7fffffff
+	vpand        xmm2, xmm9, xmm2            // xmm2 = (a ^ b) & 0x80000000
+	vpcmpgtd     xmm3, xmm3, xmm5            // xmm3 = (b & 0x7fffffff) > (a & 0x7fffffff)
+	vpblendvb    xmm6, xmm0, xmm1, xmm3      // xmm6 = max(a, b)
+	vpblendvb    xmm7, xmm1, xmm0, xmm3      // xmm7 = min(a, b)
+	vbroadcastss xmm4, [rip + mask_exponent] // xmm4 = 0x7f800000
+	vpand        xmm5, xmm4, xmm6            // xmm5 = exponent(a)
+	vpand        xmm8, xmm4, xmm7            // xmm8 = exponent(b)
+	vpsubd       xmm0, xmm5, xmm8            // xmm0 = shift = exponent(a) - exponent(b)
+	vbroadcastss xmm4, [rip + mask_mantissa] // xmm4 = 0x007fffff
+	vpand        xmm3, xmm4, xmm7            // xmm3 = b & 0x7fffff
+	vpor         xmm3, xmm3, xmm2            // xmm3 = (b & 0x7fffff) | ((a ^ b) & 0x80000000)
+	vpand        xmm2, xmm4, xmm6            // xmm2 = a & 0x7fffff
+	vbroadcastss xmm1, [rip + const_exp_151] // xmm1 = (24 + 127) << 23
+	vpsubd       xmm4, xmm1, xmm0            // xmm4 = ((25 - shift) + 127) << 23
+	vpor         xmm3, xmm3, xmm4            // xmm3 = float{sign: sign(a) != sign(b), exp: 25 - shift, mantissa: mantissa(b)}
+	vcvttps2dq   xmm3, xmm3                  // xmm3 = bmant
+	vbroadcastss xmm4, [rip + const_exp_24]  // xmm4 = 24 << 23
+	vpcmpgtd     xmm4, xmm0, xmm4            // xmm4 = shift > 24
+	vpandn       xmm3, xmm4, xmm3            // xmm3 = shift > 24 ? 0 : bmant
+	vbroadcastss xmm4, [rip + const_exp_1]   // xmm4 = 0x800000
+	vpor         xmm2, xmm4, xmm2            // xmm2 = ((a & 0x7fffff) | 0x800000)
+	vpslld       xmm2, xmm2, 1               // xmm2 = amant
+	vpaddd       xmm2, xmm2, xmm3            // xmm2 = amant + bmant
+	vpsrld       xmm3, xmm2, 24              // xmm3 = xmm2 >> 24
+	vpandn       xmm3, xmm3, xmm2            // xmm3 = ensure cvtdq2ps rounds down (amant + bmant)
+	vcvtdq2ps    xmm3, xmm3                  // xmm3 = float(amant + bmant)
+	vpsubd       xmm2, xmm5, xmm1            // xmm2 = exponent(a) - 25
+	vpaddd       xmm3, xmm3, xmm2            // xmm3 = special case ? -something : c & 0x7fffffff
+	vpcmpgtd     xmm1, xmm5, xmm1            // xmm1 = exponent(a) > 151
+	vpandn       xmm1, xmm9, xmm1            // xmm1 = exponent(a) > 151 ? 0x7fffffff : 0
+	vpand        xmm0, xmm9, xmm6            // xmm0 = a & 0x80000000
+	vpor         xmm1, xmm1, xmm0            // xmm1 = exponent(a) > 151 ? a | 0x7fffffff : a & 0x80000000
+	vpxor        xmm2, xmm9, xmm7            // xmm2 = b ^ 0x80000000
+	vpcmpeqd     xmm2, xmm2, xmm6            // xmm2 = a == (b ^ 0x80000000)
+	vpandn       xmm1, xmm2, xmm1            // xmm1 = a == (b ^ 0x80000000) ? 0 : xmm1
+	vpxor        xmm4, xmm4, xmm4            // xmm4 = 0
+	vpand        xmm7, xmm9, xmm7            // xmm7 = b & 0x80000000
+	vpcmpgtd     xmm5, xmm5, xmm4            // xmm5 = exponent(a) > 0
+	vpor         xmm5, xmm5, xmm7            // xmm5 = exponent(a) > 0 ? 0xffffffff : b & 0x80000000
+	vpand        xmm5, xmm5, xmm6            // xmm5 = exponent(a) > 0 ? a : a & b & 0x80000000
+	vpcmpeqd     xmm4, xmm8, xmm4            // xmm4 = exponent(b) == 0
+	vpblendvb    xmm1, xmm1, xmm5, xmm4      // xmm1 = value if special case
+	vpor         xmm4, xmm4, xmm2            // xmm4 = exponent(b) == 0 || a == (b ^ 0x80000000)
+	vpor         xmm4, xmm4, xmm3            // xmm4 = special case ? -something : +something
+	vpor         xmm3, xmm3, xmm0            // xmm3 = special case ? xxx : c
+	vblendvps    xmm0, xmm3, xmm1, xmm4      // xmm0 = c
+	ret
+
 .data
 .balign 64
 sse_mask_sign:
@@ -292,5 +347,9 @@ const_exp_24:
 .int 24 << 23
 const_exp_253:
 .int 253 << 23
+const_exp_151:
+.int 151 << 23
+mask_mantissa:
+.int 0x007fffff
 
 #endif // __x86_64__

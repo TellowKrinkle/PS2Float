@@ -119,6 +119,8 @@ static bool test_add_int() {
 	ok &= run_tests(ps2add_int, "Add C", false);
 #ifdef __x86_64__
 	ok &= run_tests(ps2add_int_asm, "Add ASM", false);
+	if (__builtin_cpu_supports("avx"))
+		ok &= run_tests(ps2add_int_avx, "Add AVX");
 #endif
 	return ok;
 }
