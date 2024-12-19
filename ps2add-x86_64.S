@@ -245,13 +245,15 @@ GNAME(ps2add_int_asm):
 	cmp    edi, esi
 	cmove  r11d, edx        // if (a == (b ^ 0x80000000)) r11d = 0
 	sete   dl               // dl = a == (b ^ 0x80000000)
+	shl    ecx, 23
+	or     eax, ecx         // eax = (a & 0x80000000) | (cexp << 23) | (amant & 0x7fffff)
 	test   r8b, r8b
 	cmovz  r11d, r10d       // if (!bexp) r11d = r9d
 	setz   r9b              // d9b = !bexp
 	or     dl, r9b          // dl = !bexp || a == (b ^ 0x80000000)
-	or     dl, ch           // dl = any special case
-	shl    ecx, 23
-	or     eax, ecx         // eax = (a & 0x80000000) | (cexp << 23) | (amant & 0x7fffff)
+	cmp    ecx, 1 << 23
+	setl   cl               // cl = cexp > 255 || cexp < 1
+	or     dl, cl           // dl = any special case
 	test   dl, dl
 	cmovnz eax, r11d        // if (any special case) eax = r11d
 	ret
@@ -298,17 +300,18 @@ GNAME(ps2add_int_avx):
 	vpxor        xmm2, xmm9, xmm7            // xmm2 = b ^ 0x80000000
 	vpcmpeqd     xmm2, xmm2, xmm6            // xmm2 = a == (b ^ 0x80000000)
 	vpandn       xmm1, xmm2, xmm1            // xmm1 = a == (b ^ 0x80000000) ? 0 : xmm1
-	vpxor        xmm4, xmm4, xmm4            // xmm4 = 0
 	vpand        xmm7, xmm9, xmm7            // xmm7 = b & 0x80000000
+	vpcmpgtd     xmm9, xmm4, xmm3            // xmm9 = (1 << 23) > xmm3
+	vpxor        xmm4, xmm4, xmm4            // xmm4 = 0
 	vpcmpgtd     xmm5, xmm5, xmm4            // xmm5 = exponent(a) > 0
 	vpor         xmm5, xmm5, xmm7            // xmm5 = exponent(a) > 0 ? 0xffffffff : b & 0x80000000
 	vpand        xmm5, xmm5, xmm6            // xmm5 = exponent(a) > 0 ? a : a & b & 0x80000000
 	vpcmpeqd     xmm4, xmm8, xmm4            // xmm4 = exponent(b) == 0
 	vpblendvb    xmm1, xmm1, xmm5, xmm4      // xmm1 = value if special case
 	vpor         xmm4, xmm4, xmm2            // xmm4 = exponent(b) == 0 || a == (b ^ 0x80000000)
-	vpor         xmm4, xmm4, xmm3            // xmm4 = special case ? -something : +something
+	vpor         xmm4, xmm9, xmm4            // xmm4 = special case ? -something : +something
 	vpor         xmm3, xmm3, xmm0            // xmm3 = special case ? xxx : c
-	vblendvps    xmm0, xmm3, xmm1, xmm4      // xmm0 = c
+	vpblendvb    xmm0, xmm3, xmm1, xmm4      // xmm0 = c
 	ret
 
 .data
