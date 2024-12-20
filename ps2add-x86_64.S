@@ -1,6 +1,6 @@
 #ifdef __x86_64__
 
-.intel_syntax
+.intel_syntax noprefix
 .text
 #ifdef __APPLE__
 #define GNAME(x) _##x
