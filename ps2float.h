@@ -19,6 +19,7 @@ uint32_t ps2mul(uint32_t a, uint32_t b);
 #ifdef __x86_64__
 uint32_t ps2add_asm(uint32_t a, uint32_t b);
 uint32_t ps2add_int_asm(uint32_t a, uint32_t b);
+uint32_t ps2mul_asm(uint32_t a, uint32_t b);
 
 __m128i ps2add_avx2(__m128i a, __m128i b);
 __m128i ps2add_avx(__m128i a, __m128i b);
