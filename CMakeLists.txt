@@ -10,6 +10,7 @@ add_library(ps2float
 	ps2add.cpp
 	ps2add-x86_64.S
 	ps2mul.cpp
+	ps2mul-x86_64.S
 )
 target_compile_features(ps2float PRIVATE cxx_std_20)
 

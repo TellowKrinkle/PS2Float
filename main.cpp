@@ -58,6 +58,11 @@ static constexpr Test TESTS_MUL[] = {
 	{ 0x3f9e4791, 0x7f800000, 0x7f9e4791 },
 	{ 0x3f800400, 0x3f800001, 0x3f800401 },
 	{ 0x3f800400, 0x3f800002, 0x3f800401 },
+	{ 0x3faaab00, 0x3f800003, 0x3faaab03 },
+	{ 0x408f0000, 0x7e8fffff, 0x7fa0dffe },
+	{ 0x40cf0000, 0x7ecfffff, 0x7fffffff },
+	{ 0x3f480000, 0x00c80000, 0x009c4000 },
+	{ 0x3f080000, 0x00c80000, 0x00000000 },
 };
 
 struct TestList {
@@ -164,6 +169,9 @@ static bool test_add_int(TestList tests, bool print) {
 static bool test_mul(TestList tests, bool print) {
 	bool ok = true;
 	ok &= run_tests(ps2mul, tests, "*", "Mul C", print, print);
+#ifdef __x86_64__
+	ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
+#endif
 	return ok;
 }
 
