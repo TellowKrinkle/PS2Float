@@ -278,7 +278,7 @@ GNAME(ps2add_int_avx):
 	vpor         xmm3, xmm3, xmm2            // xmm3 = (b & 0x7fffff) | ((a ^ b) & 0x80000000)
 	vpand        xmm2, xmm4, xmm6            // xmm2 = a & 0x7fffff
 	vbroadcastss xmm1, [rip + const_exp_151] // xmm1 = (24 + 127) << 23
-	vpsubd       xmm4, xmm1, xmm0            // xmm4 = ((25 - shift) + 127) << 23
+	vpsubd       xmm4, xmm1, xmm0            // xmm4 = ((24 - shift) + 127) << 23
 	vpor         xmm3, xmm3, xmm4            // xmm3 = float{sign: sign(a) != sign(b), exp: 25 - shift, mantissa: mantissa(b)}
 	vcvttps2dq   xmm3, xmm3                  // xmm3 = bmant
 	vbroadcastss xmm4, [rip + const_exp_24]  // xmm4 = 24 << 23
@@ -314,6 +314,75 @@ GNAME(ps2add_int_avx):
 	vpblendvb    xmm0, xmm3, xmm1, xmm4      // xmm0 = c
 	ret
 
+.balign 16
+.globl GNAME(ps2add_int_sse4)
+GNAME(ps2add_int_sse4):
+	movdqa    xmm6, xmm0
+	movdqa    xmm7, xmm1
+	movaps    xmm5, [rip + sse_mask_rest]
+	pand      xmm5, xmm0                      // xmm5 = a & 0x7fffffff
+	pxor      xmm0, xmm1                      // xmm0 = a ^ b
+	movaps    xmm2, [rip + sse_mask_sign]
+	pand      xmm2, xmm0                      // xmm2 = (a ^ b) & 0x80000000
+	movaps    xmm0, [rip + sse_mask_rest]
+	pand      xmm0, xmm1                      // xmm0 = b & 0x7fffffff
+	pcmpgtd   xmm0, xmm5                      // xmm0 = (b & 0x7fffffff) > (a & 0x7fffffff)
+	pblendvb  xmm7, xmm6, xmm0                // xmm7 = min(a, b)
+	pblendvb  xmm6, xmm1, xmm0                // xmm6 = max(a, b)
+	movaps    xmm0, [rip + sse_mask_exponent]
+	pand      xmm0, xmm6                      // xmm0 = exponent(a)
+	movaps    xmm8, [rip + sse_mask_exponent]
+	pand      xmm8, xmm7                      // xmm8 = exponent(b)
+	movdqa    xmm5, xmm0                      // xmm5 = exponent(a)
+	psubd     xmm0, xmm8                      // xmm0 = shift = exponent(a) - exponent(b)
+	movaps    xmm3, [rip + sse_mask_mantissa]
+	pand      xmm3, xmm7                      // xmm3 = b & 0x7fffff
+	por       xmm3, xmm2                      // xmm3 = (b & 0x7fffff) | ((a ^ b) & 0x80000000)
+	movaps    xmm2, [rip + sse_mask_mantissa]
+	pand      xmm2, xmm6                      // xmm2 = a & 0x7fffff
+	movaps    xmm4, [rip + sse_const_exp_151] // xmm1 = (24 + 127) << 23
+	psubd     xmm4, xmm0                      // xmm4 = ((24 - shift) + 127) << 23
+	por       xmm3, xmm4                      // xmm3 = float{sign: sign(a) != sign(b), exp: 25 - shift, mantissa: mantissa(b)}
+	cvttps2dq xmm3, xmm3                      // xmm3 = bmant
+	pcmpgtd   xmm0, [rip + sse_const_exp_24]  // xmm0 = shift > 24
+	pandn     xmm0, xmm3                      // xmm0 = shift > 24 ? 0 : bmant
+	movaps    xmm1, [rip + sse_const_exp_1]
+	por       xmm2, xmm1                      // xmm2 = ((a & 0x7fffff) | 0x800000)
+	pslld     xmm2, 1                         // xmm2 = amant
+	paddd     xmm2, xmm0                      // xmm2 = amant + bmant
+	movdqa    xmm3, xmm2                      // xmm3 = amant + bmant
+	psrld     xmm2, 24                        // xmm2 = xmm2 >> 24
+	pandn     xmm2, xmm3                      // xmm2 = ensure cvtdq2ps rounds down (amant + bmant)
+	cvtdq2ps  xmm3, xmm2                      // xmm3 = float(amant + bmant)
+	movdqa    xmm2, xmm5
+	movaps    xmm0, [rip + sse_const_exp_151]
+	psubd     xmm2, xmm0                      // xmm2 = exponent(a) - 25
+	paddd     xmm3, xmm2                      // xmm3 = special case ? -something : c & 0x7fffffff
+	pcmpgtd   xmm0, xmm5                      // xmm0 = exponent(a) < 151
+	pandn     xmm0, [rip + sse_mask_rest]     // xmm0 = exponent(a) < 151 ? 0 : 0x7fffffff
+	pcmpgtd   xmm1, xmm3                      // xmm1 = (1 << 23) > xmm3
+	movaps    xmm4, [rip + sse_mask_sign]
+	pand      xmm4, xmm6                      // xmm4 = a & 0x80000000
+	por       xmm0, xmm4                      // xmm0 = exponent(a) < 151 ? a & 0x80000000 : a | 0x7fffffff
+	por       xmm3, xmm4                      // xmm3 = special case ? xxx : c
+	movaps    xmm4, [rip + sse_mask_sign]
+	pxor      xmm4, xmm7                      // xmm4 = b ^ 0x80000000
+	pcmpeqd   xmm4, xmm6                      // xmm4 = a == (b ^ 0x80000000)
+	movdqa    xmm2, xmm4                      // xmm2 = a == (b ^ 0x80000000)
+	pandn     xmm4, xmm0                      // xmm4 = a == (b ^ 0x80000000) ? 0 : xmm1
+	pand      xmm7, [rip + sse_mask_sign]     // xmm7 = b & 0x80000000
+	pxor      xmm0, xmm0                      // xmm4 = 0
+	pcmpgtd   xmm5, xmm0                      // xmm5 = exponent(a) > 0
+	por       xmm5, xmm7                      // xmm5 = exponent(a) > 0 ? 0xffffffff : b & 0x80000000
+	pand      xmm5, xmm6                      // xmm5 = exponent(a) > 0 ? a : a & b & 0x80000000
+	pcmpeqd   xmm0, xmm8                      // xmm0 = exponent(b) == 0
+	pblendvb  xmm4, xmm5, xmm0                // xmm4 = value if special case
+	por       xmm0, xmm2                      // xmm0 = exponent(b) == 0 || a == (b ^ 0x80000000)
+	por       xmm0, xmm1                      // xmm0 = special case ? ~0 : 0
+	pblendvb  xmm3, xmm4, xmm0                // xmm3 = c
+	movdqa    xmm0, xmm3                      // xmm0 = c
+	ret
+
 .data
 .balign 64
 sse_mask_sign:
@@ -332,8 +401,12 @@ sse_const_exp_24:
 .int  24 << 23,  24 << 23,  24 << 23,  24 << 23
 sse_const_exp_253:
 .int 253 << 23, 253 << 23, 253 << 23, 253 << 23
+sse_const_exp_151:
+.int 151 << 23, 151 << 23, 151 << 23, 151 << 23
+sse_mask_mantissa:
+.int 0x007fffff, 0x007fffff, 0x007fffff, 0x007fffff
 
-.balign 32
+.balign 64
 mask_sign:
 .int 0x80000000
 mask_rest:
