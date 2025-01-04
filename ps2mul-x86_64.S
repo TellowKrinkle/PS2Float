@@ -137,19 +137,15 @@ GNAME(ps2mul_asm):
 
 	mov    eax, r8d
 	mov    edx, r9d
+	xor    r8d, r9d
+	and    r8d, 0x80000000  // r8d = sign = (a ^ b) & 0x80000000
 	and    eax, 0x7f800000
-	setz   r11b
+	jz     Lps2mul_asm_mul_zero
 	and    edx, 0x7f800000
-	setz   r12b
-	or     r12b, r11b       // r12b = !ea || !eb
+	jz     Lps2mul_asm_mul_zero
 
 	add    eax, edx
 	sub    eax, (127 << 23) // eax = exponent(a) + exponent(b) - 127
-
-	xor    r8d, r9d
-	and    r8d, 0x80000000  // r8d = sign = (a ^ b) & 0x80000000
-	mov    esi, r8d
-	or     esi, 0x7fffffff  // esi = sign | 0x7fffffff
 
 	mov    edx, ecx
 	shr    ecx, 1
@@ -159,22 +155,27 @@ GNAME(ps2mul_asm):
 	add    eax, ecx
 	and    edi, 0x7fffff
 
-	cmp    eax, (-127 << 23)
-	setge  dl
-	or     dl, r12b
-	cmovnz esi, r8d         // if (ec <= 0xff) esi = sign
-
 	cmp    eax, (1 << 23)
-	setl   dl
-	or     dl, r12b
+	jl     Lps2mul_asm_out_of_range
 
 	or     eax, r8d
 	or     eax, edi
-	test   dl, dl
-	cmovnz eax, esi
 
+Lps2mul_asm_done:
 	pop    r12
 	pop    rbx
 	ret
+
+Lps2mul_asm_mul_zero:
+	mov    eax, r8d         // return sign
+	jmp    Lps2mul_asm_done
+
+Lps2mul_asm_out_of_range:
+	mov    edx, r8d
+	or     edx, 0x7fffffff  // edx = sign | 0x7fffffff
+	cmp    eax, (-127 << 23)
+	mov    eax, r8d
+	cmovl  eax, edx         // return overflow ? sign | 0x7fffffff : sign
+	jmp    Lps2mul_asm_done
 
 #endif // __x86_64__
