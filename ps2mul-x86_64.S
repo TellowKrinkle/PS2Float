@@ -78,6 +78,17 @@
 	\addop \b, \b, \b
 .endm
 
+.macro CSA_SSE a, b, c, tmp, addop=paddw
+	movdqa \tmp, \a
+	pxor   \a, \b
+	pand   \tmp, \b
+	movdqa \b, \c
+	pand   \b, \a
+	pxor   \a, \c
+	por    \b, \tmp
+	\addop \b, \b
+.endm
+
 .balign 16
 .globl GNAME(ps2mul_asm)
 GNAME(ps2mul_asm):
@@ -388,6 +399,106 @@ Lps2mul_avx_out_of_range:
 	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
 	jmp          Lps2mul_avx_done
 
+.balign 16
+.globl GNAME(ps2mul_one_sse4)
+GNAME(ps2mul_one_sse4):
+	movd       eax, xmm0
+	movd       edx, xmm1
+	pshufb     xmm1, [rip + one_b_shuf]
+	pmullw     xmm1, [rip + one_b_shift]    // xmm1 = b << (bit * 2 + 7)
+	pshufb     xmm0, [rip + sse_broadcastw_shuf]
+	movaps     xmm5, [rip + one_pos]
+	pmullw     xmm0, xmm5                   // xmm0 = a << (bit * 2)
+	pand       xmm1, [rip + sse_const_700w] // xmm1 = test = (b << (bit * 2 - 1)) & 7
+	movq       xmm4, [rip + booth_table]
+	pshufb     xmm4, xmm1                   // xmm4 = booth[test] << 8
+	movdqa     xmm3, xmm4
+	psraw      xmm4, 8                      // xmm4 = booth[test]
+	pmullw     xmm0, xmm4                   // xmm0 = a * booth[test]
+	psraw      xmm3, 15                     // xmm3 = booth[test] < 0 ? ~0 : 0
+	pand       xmm3, xmm5                   // xmm3 = negate[test]
+	psubw      xmm0, xmm3                   // xmm0 = booth(a) (correct negate to invert)
+	movd       xmm2, [rip + mask_fff]
+	pandn      xmm2, xmm0                   // xmm2 = b5.data & ~0xfffu, b2.data
+	pshufd     xmm1, xmm0, 1                // xmm1 = b4.data,           b1.data
+	pshufd     xmm4, xmm0, 2                // xmm3 = b6.data,           b3.data
+	CSA_SSE a=xmm1, b=xmm2, c=xmm4, tmp=xmm5
+	pxor       xmm5, xmm5
+	pblendw    xmm3, xmm5, 0xaa             // mask out negate of b0-b3
+	pshufd     xmm4, xmm3, 2                // xmm3 = b6.negate
+	movd       xmm5, [rip + mask_800]
+	pand       xmm5, xmm0                   // xmm5 = b5.data & 0x800
+	por        xmm4, xmm5                   // xmm4 = b6.negate | (b5.data & 0x800)
+	por        xmm2, xmm4                   // t1.hi |= b6.negate | (b5.data & 0x800)
+	pshufd     xmm4, xmm0, 3                // xmm3 = b7.data, b0.data
+	movd       xmm5, [rip + mask_400]
+	pand       xmm5, xmm0                   // xmm5 = b5.data & 0x400
+	paddw      xmm5, xmm3                   // xmm5 = (b5.data & 0x400) + b5.negate, 0, xxx...
+	por        xmm4, xmm5                   // b7.data |= (b5.data & 0x400) + b5.negate
+	CSA_SSE a=xmm1, b=xmm2, c=xmm4, tmp=xmm5
+	pshuflw    xmm0, xmm1, 1                // xmm0 = t2.lo
+	pshuflw    xmm4, xmm2, 1                // xmm4 = t2.hi
+	CSA_SSE a=xmm1, b=xmm2, c=xmm4, tmp=xmm5
+	CSA_SSE a=xmm1, b=xmm0, c=xmm2, tmp=xmm5
+	pshufd     xmm3, xmm3, 3
+	paddd      xmm0, xmm3                   // t5.hi += b7.negate
+	pxor       xmm0, xmm1                   // xmm0 = ps2lo = t5.lo ^ t5.hi
+
+	mov          esi, eax
+	mov          edi, edx
+	and          esi, 0x7fffff
+	and          edi, 0x7fffff
+	or           esi, 0x800000
+	or           edi, 0x800000
+	imul         rsi, rdi                        // rsi = full
+
+	movd         edi, xmm0
+	and          edi, 0x8000
+	sub          rsi, rdi
+	shr          rsi, 23                         // rsi = mc
+
+	mov          ecx, eax
+	xor          ecx, edx
+	and          ecx, 0x80000000                 // ecx = sign = (a ^ b) & 0x80000000
+	and          eax, 0x7f800000                 // eax = exponent(a)
+	jz           Lps2mul_sse4_mul_zero
+	and          edx, 0x7f800000                 // edx = exponent(b)
+	jz           Lps2mul_sse4_mul_zero
+
+	add          eax, edx
+	sub          eax, (127 << 23)                // eax = exponent(a) + exponent(b) - 127
+
+	mov          edx, esi
+	shr          esi, 1
+	mov          edi, esi
+	and          esi, 0x800000
+	cmovz        edi, edx
+	add          eax, esi
+	and          edi, 0x7fffff
+
+	cmp          eax, (1 << 23)
+	jl           Lps2mul_sse4_out_of_range
+
+	or           eax, ecx
+	or           eax, edi
+
+Lps2mul_sse4_done:
+	movd         xmm0, eax
+	pshufd       xmm0, xmm0, 0                   // Not really necessary, but tests want the result in all lanes to verify multilane vector functions
+	ret
+
+Lps2mul_sse4_mul_zero:
+	mov          eax, ecx                        // return sign
+	jmp          Lps2mul_sse4_done
+
+Lps2mul_sse4_out_of_range:
+	mov          edx, ecx
+	or           edx, 0x7fffffff                 // edx = sign | 0x7fffffff
+	cmp          eax, (-127 << 23)
+	mov          eax, ecx
+	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
+	jmp          Lps2mul_sse4_done
+
 .data
 .balign 64
 one_pos:
@@ -410,5 +521,11 @@ mask_ffff:
 .int 0xffff
 const_700w:
 .short 0x700, 0x700
+
+.balign 16
+sse_broadcastw_shuf:
+.byte 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1
+sse_const_700w:
+.short 0x700, 0x700, 0x700, 0x700, 0x700, 0x700, 0x700, 0x700
 
 #endif // __x86_64__
