@@ -69,6 +69,15 @@
 	add \b, \b
 .endm
 
+.macro CSA_AVX a, b, c, tmp, addop=vpaddw
+	vpand  \tmp, \a, \b
+	vpxor  \a, \a, \b
+	vpand  \b, \a, \c
+	vpxor  \a, \a, \c
+	vpor   \b, \b, \tmp
+	\addop \b, \b, \b
+.endm
+
 .balign 16
 .globl GNAME(ps2mul_asm)
 GNAME(ps2mul_asm):
@@ -177,5 +186,128 @@ Lps2mul_asm_out_of_range:
 	mov    eax, r8d
 	cmovl  eax, edx         // return overflow ? sign | 0x7fffffff : sign
 	jmp    Lps2mul_asm_done
+
+.balign 16
+.globl GNAME(ps2mul_one_avx2)
+GNAME(ps2mul_one_avx2):
+	vpshufb      xmm3, xmm1, [rip + one_b_shuf]
+	vpmullw      xmm3, xmm3, [rip + one_b_shift] // xmm3 = b << (bit * 2 + 7)
+	vpbroadcastw xmm2, xmm0
+	vmovdqa      xmm5, [rip + one_pos]
+	vpmullw      xmm2, xmm2, xmm5                // xmm2 = a << (bit * 2)
+	vpbroadcastd xmm4, [rip + const_700w]
+	vpand        xmm3, xmm3, xmm4                // xmm3 = test = (b << (bit * 2 - 1)) & 7
+	vmovq        xmm4, [rip + booth_table]
+	vpshufb      xmm4, xmm4, xmm3                // xmm4 = booth[test] << 8
+	vpsraw       xmm3, xmm4, 8                   // xmm3 = booth[test]
+	vpmullw      xmm2, xmm2, xmm3                // xmm2 = a * booth[test]
+	vpsraw       xmm4, xmm4, 15                  // xmm4 = booth[test] < 0 ? ~0 : 0
+	vpand        xmm4, xmm4, xmm5                // xmm4 = negate[test]
+	vpsubw       xmm2, xmm2, xmm4                // xmm2 = booth(a) (correct negate to invert)
+	vmovd        eax, xmm0
+	vmovd        edx, xmm1
+	vmovd        xmm1, [rip + mask_fff]
+	vpandn       xmm1, xmm1, xmm2                // xmm1 = b5.data & ~0xfffu, b2.data
+	vpsrlq       xmm0, xmm2, 32                  // xmm0 = b4.data,           b1.data
+	vpunpckhqdq  xmm3, xmm2, xmm2                // xmm3 = b6.data,           b3.data
+	CSA_AVX a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	vpbroadcastd xmm5, [rip + mask_ffff]
+	vpand        xmm4, xmm4, xmm5                // mask out negate of b0-b3
+	vpunpckhqdq  xmm3, xmm4, xmm4                // xmm4 = b6.negate
+	vmovd        xmm5, [rip + mask_800]
+	vpand        xmm5, xmm5, xmm2                // xmm5 = b5.data & 0x800
+	vpor         xmm3, xmm3, xmm5                // xmm3 = b6.negate | (b5.data & 0x800)
+	vpor         xmm1, xmm1, xmm3                // t1.hi |= b6.negate | (b5.data & 0x800)
+	vpshufd      xmm3, xmm2, 3                   // xmm3 = b7.data, b0.data
+	vmovd        xmm5, [rip + mask_400]
+	vpand        xmm5, xmm5, xmm2                // xmm5 = b5.data & 0x400
+	vpaddw       xmm5, xmm5, xmm4                // xmm5 = (b5.data & 0x400) + b5.negate, 0, xxx...
+	vpor         xmm3, xmm3, xmm5                // b7.data |= (b5.data & 0x400) + b5.negate
+	CSA_AVX a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	vpsrld       xmm2, xmm0, 16                  // xmm2 = t2.lo
+	vpsrld       xmm3, xmm1, 16                  // xmm3 = t2.hi
+	CSA_AVX a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	CSA_AVX a=xmm0, b=xmm2, c=xmm1, tmp=xmm5
+	vpshufd      xmm4, xmm4, 3
+	vpaddd       xmm2, xmm2, xmm4                // t5.hi += b7.negate
+	vpxor        xmm0, xmm0, xmm2                // xmm0 = ps2lo = t5.lo ^ t5.hi
+
+	mov          esi, eax
+	mov          edi, edx
+	and          esi, 0x7fffff
+	and          edi, 0x7fffff
+	or           esi, 0x800000
+	or           edi, 0x800000
+	imul         rsi, rdi                        // rsi = full
+
+	vmovd        edi, xmm0
+	and          edi, 0x8000
+	sub          rsi, rdi
+	shr          rsi, 23                         // rsi = mc
+
+	mov          ecx, eax
+	xor          ecx, edx
+	and          ecx, 0x80000000                 // ecx = sign = (a ^ b) & 0x80000000
+	and          eax, 0x7f800000                 // eax = exponent(a)
+	jz           Lps2mul_avx2_mul_zero
+	and          edx, 0x7f800000                 // edx = exponent(b)
+	jz           Lps2mul_avx2_mul_zero
+
+	add          eax, edx
+	sub          eax, (127 << 23)                // eax = exponent(a) + exponent(b) - 127
+
+	mov          edx, esi
+	shr          esi, 1
+	mov          edi, esi
+	and          esi, 0x800000
+	cmovz        edi, edx
+	add          eax, esi
+	and          edi, 0x7fffff
+
+	cmp          eax, (1 << 23)
+	jl           Lps2mul_avx2_out_of_range
+
+	or           eax, ecx
+	or           eax, edi
+
+Lps2mul_avx2_done:
+	vmovd        xmm0, eax
+	vpbroadcastd xmm0, xmm0                      // Not really necessary, but tests want the result in all lanes to verify multilane vector functions
+	ret
+
+Lps2mul_avx2_mul_zero:
+	mov          eax, ecx                        // return sign
+	jmp          Lps2mul_avx2_done
+
+Lps2mul_avx2_out_of_range:
+	mov          edx, ecx
+	or           edx, 0x7fffffff                 // edx = sign | 0x7fffffff
+	cmp          eax, (-127 << 23)
+	mov          eax, ecx
+	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
+	jmp          Lps2mul_avx2_done
+
+.data
+.balign 64
+one_pos:
+//         b5,     b2,     b4,     b1,     b6,     b3,     b7,     b0
+.short 0x0400, 0x0010, 0x0100, 0x0004, 0x1000, 0x0040, 0x4000, 0x0001
+one_b_shuf:
+.byte  1, 128,   0, 1,   0, 1,   0, 1, 1, 128,   0, 1, 1, 128,   0, 1
+//     0x0e00, 0x0038, 0x0380, 0x000e, 0x3800, 0x00e0, 0xe000, 0x0003
+one_b_shift:
+.short 0x0080, 0x0020, 0x0002, 0x0080, 0x0020, 0x0008, 0x0008, 0x0200
+booth_table:
+.byte 0, 1, 1, 2, -2, -1, -1, 0
+mask_fff:
+.int 0xfff
+mask_400:
+.int 0x400
+mask_800:
+.int 0x800
+mask_ffff:
+.int 0xffff
+const_700w:
+.short 0x700, 0x700
 
 #endif // __x86_64__

@@ -171,6 +171,8 @@ static bool test_mul(TestList tests, bool print) {
 	ok &= run_tests(ps2mul, tests, "*", "Mul C", print, print);
 #ifdef __x86_64__
 	ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
+	if (__builtin_cpu_supports("avx2"))
+		ok &= run_tests(ps2mul_one_avx2, tests, "*", "Mul One AVX2", print);
 #endif
 	return ok;
 }

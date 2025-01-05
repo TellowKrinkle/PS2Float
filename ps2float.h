@@ -26,6 +26,7 @@ __m128i ps2add_avx(__m128i a, __m128i b);
 __m128i ps2add_sse4(__m128i a, __m128i b);
 __m128i ps2add_int_avx(__m128i a, __m128i b);
 __m128i ps2add_int_sse4(__m128i a, __m128i b);
+__m128i ps2mul_one_avx2(__m128i a, __m128i b);
 #endif
 
 #ifdef __cplusplus
