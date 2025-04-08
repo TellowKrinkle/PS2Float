@@ -175,8 +175,10 @@ static bool test_mul(TestList tests, bool print) {
 		ok &= run_tests(ps2mul_one_avx2, tests, "*", "Mul One AVX2", print);
 		ok &= run_tests(ps2mul_avx2, tests, "*", "Mul AVX2", print);
 	}
-	if (__builtin_cpu_supports("avx"))
+	if (__builtin_cpu_supports("avx")) {
 		ok &= run_tests(ps2mul_one_avx, tests, "*", "Mul One AVX", print);
+		ok &= run_tests(ps2mul_avx, tests, "*", "Mul AVX", print);
+	}
 	if (__builtin_cpu_supports("sse4.1"))
 		ok &= run_tests(ps2mul_one_sse4, tests, "*", "Mul One SSE4", print);
 #endif
