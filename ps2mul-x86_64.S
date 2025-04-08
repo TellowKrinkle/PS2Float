@@ -216,7 +216,7 @@ GNAME(ps2mul_one_avx2):
 	vpbroadcastw xmm2, xmm0
 	vmovdqa      xmm5, [rip + one_pos]
 	vpmullw      xmm2, xmm2, xmm5                // xmm2 = a << (bit * 2)
-	vpbroadcastd xmm4, [rip + const_700w]
+	vpbroadcastd xmm4, [rip + const_7b]
 	vpand        xmm3, xmm3, xmm4                // xmm3 = test = (b << (bit * 2 - 1)) & 7
 	vmovq        xmm4, [rip + booth_table]
 	vpshufb      xmm4, xmm4, xmm3                // xmm4 = booth[test] << 8
@@ -317,7 +317,7 @@ GNAME(ps2mul_one_avx):
 	vpshufb      xmm2, xmm0, xmm4
 	vmovdqa      xmm5, [rip + one_pos]
 	vpmullw      xmm2, xmm2, xmm5                // xmm2 = a << (bit * 2)
-	vbroadcastss xmm4, [rip + const_700w]
+	vbroadcastss xmm4, [rip + const_7b]
 	vpand        xmm3, xmm3, xmm4                // xmm3 = test = (b << (bit * 2 - 1)) & 7
 	vmovq        xmm4, [rip + booth_table]
 	vpshufb      xmm4, xmm4, xmm3                // xmm4 = booth[test] << 8
@@ -419,7 +419,7 @@ GNAME(ps2mul_one_sse4):
 	pshufb     xmm0, [rip + sse_broadcastw_shuf]
 	movaps     xmm5, [rip + one_pos]
 	pmullw     xmm0, xmm5                   // xmm0 = a << (bit * 2)
-	pand       xmm1, [rip + sse_const_700w] // xmm1 = test = (b << (bit * 2 - 1)) & 7
+	pand       xmm1, [rip + sse_const_7b]   // xmm1 = test = (b << (bit * 2 - 1)) & 7
 	movq       xmm4, [rip + booth_table]
 	pshufb     xmm4, xmm1                   // xmm4 = booth[test] << 8
 	movdqa     xmm3, xmm4
@@ -509,6 +509,8 @@ Lps2mul_sse4_out_of_range:
 	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
 	jmp          Lps2mul_sse4_done
 
+// Note: According to uica.uops.info, this isn't actually any faster than the avx version
+// (And it'll definitely be slower on Zen 1 where ymm ops are split into two uops.)
 .balign 16
 .globl GNAME(ps2mul_avx2)
 GNAME(ps2mul_avx2):
@@ -525,7 +527,7 @@ GNAME(ps2mul_avx2):
 	vmovdqa        ymm9, [rip + ymm_one_pos_6370]
 	vpmullw        ymm4, ymm8, ymm5                     // ymm5 = [l] a << (bit * 2)
 	vpmullw        ymm5, ymm9, ymm5                     // ymm6 = [h] a << (bit * 2)
-	vpbroadcastd   ymm2, [rip + const_700w]
+	vpbroadcastd   ymm2, [rip + const_7b]
 	vpand          ymm6, ymm2, ymm6                     // ymm6 = [l] test = (b << (bit * 2 - 1)) & 7
 	vpand          ymm7, ymm2, ymm7                     // ymm7 = [h] test = (b << (bit * 2 - 1)) & 7
 	vpbroadcastq   ymm2, [rip + booth_table]
@@ -620,6 +622,127 @@ GNAME(ps2mul_avx2):
 	vzeroupper
 	ret
 
+// PS2 booth ignores all bits below bit 10
+// AVX multiply takes advantage of this by doing booth computations single byte values representing bits 8:15 of the original number
+// This allows it to squish the 8x4 booth calculations into 2 4x4 byte vector calculations
+.balign 16
+.globl GNAME(ps2mul_avx)
+GNAME(ps2mul_avx):
+	vpslld       xmm7, xmm1, 1
+	vmovaps      xmm2, [rip + dup_16_to_32_shuf]
+	vpshufb      xmm6, xmm1, xmm2
+	vbroadcastss xmm3, [rip + b_shift_1526]
+	vpmulhuw     xmm6, xmm6, xmm3                       // xmm6 = b.1526
+	vpslld       xmm3, xmm1, 11
+	vpblendw     xmm7, xmm7, xmm3, 0xaa                 // xmm7 = b.0437
+	vpshufb      xmm4, xmm0, xmm2
+	vbroadcastss xmm3, [rip + a_shift_5162]
+	vpmullw      xmm4, xmm4, xmm3                       // xmm4 = a.5162
+	vpslld       xmm5, xmm0, 22
+	vpblendw     xmm5, xmm5, xmm0, 0x55                 // xmm5 = a.4073
+	vpshufb      xmm7, xmm7, [rip + shuf_0437_to_0734]  // xmm7 = b.0734
+	vbroadcastss xmm3, [rip + const_7b]
+	vpand        xmm7, xmm7, xmm3                       // xmm7 = b.0734 booth selection bits
+	vpand        xmm6, xmm6, xmm3                       // xmm6 = b.1526 booth selection bits
+	vpshufb      xmm5, xmm5, [rip + shuf_4073_to_0734]  // xmm5 = a.0734
+	vpshufb      xmm4, xmm4, [rip + bswap16_shuf]       // xmm4 = a.1526
+	vmovq        xmm8, [rip + booth_2x_table]
+	vmovq        xmm9, [rip + booth_zero_table]
+	vpshufb      xmm2, xmm8, xmm7
+	vpshufb      xmm3, xmm9, xmm7
+	vpand        xmm2, xmm2, xmm5
+	vpand        xmm5, xmm5, xmm3
+	vpaddb       xmm5, xmm5, xmm2
+	vpshufb      xmm2, xmm8, xmm6
+	vpshufb      xmm3, xmm9, xmm6
+	vpand        xmm2, xmm2, xmm4
+	vpand        xmm4, xmm4, xmm3
+	vpaddb       xmm4, xmm4, xmm2
+	vmovq        xmm8, [rip + booth_neg_table]
+	vpshufb      xmm7, xmm8, xmm7                       // xmm7 = 0734 negate
+	vpshufb      xmm6, xmm8, xmm6                       // xmm6 = 1526 negate
+	vpxor        xmm5, xmm5, xmm7                       // xmm5 = 0734 booth
+	vpxor        xmm4, xmm4, xmm6                       // xmm4 = 1526 booth
+	vbroadcastss xmm2, [rip + mask_f0ffw]
+	vpsrld       xmm8, xmm5, 16                         // xmm8 = 34xx
+	vpand        xmm2, xmm2, xmm4                       // xmm3 = 1526 with low bits masked out
+	vpsrld       xmm3, xmm2, 16                         // xmm3 = 26xx
+	CSA_AVX a=xmm8, b=xmm2, c=xmm3, tmp=xmm9, addop=vpaddb
+	vbroadcastss xmm9, [rip + mask_c0ff]
+	vpand        xmm5, xmm9, xmm5                       // xmm5 = mask unwanted bits from 07
+	vbroadcastss xmm9, [rip + mask_10000400]
+	vpand        xmm6, xmm9, xmm6                       // xmm6 = b5.negate, b6.negate
+	vpand        xmm3, xmm9, xmm4                       // xmm3 = b5.data & 0x400
+	vpaddb       xmm3, xmm3, xmm6
+	vpor         xmm5, xmm5, xmm3                       // b7.data |= (b5.data & 0x400) + b5.negate
+	vbroadcastss xmm3, [rip + mask_800]
+	vpand        xmm4, xmm4, xmm3                       // xmm4 = b5.data & 0x800
+	vpsrld       xmm6, xmm6, 16                         // xmm6 = b6.negate
+	vpor         xmm4, xmm4, xmm6                       // xmm4 = b6.negate | (b5.data & 0x800)
+	vpor         xmm2, xmm2, xmm4                       // t1.hi |= b6.negate | (b5.data & 0x800)
+	CSA_AVX a=xmm8, b=xmm5, c=xmm2, tmp=xmm3, addop=vpaddb
+	vpsllw       xmm2, xmm8, 8                          // xmm2 = t2.lo
+	vpsllw       xmm3, xmm5, 8                          // xmm3 = t2.hi
+	CSA_AVX a=xmm8, b=xmm5, c=xmm3, tmp=xmm4, addop=vpaddb
+	CSA_AVX a=xmm8, b=xmm2, c=xmm5, tmp=xmm4, addop=vpaddb
+	vbroadcastss xmm3, [rip + mask_4000]
+	vpand        xmm7, xmm7, xmm3                       // xmm7 = b7.negate
+	vpaddb       xmm2, xmm2, xmm7                       // t5.hi += b7.negate
+	vpxor        xmm2, xmm8, xmm2                       // xmm2 = ps2lo = t5.lo ^ t5.hi
+
+	vbroadcastss   xmm8, [rip + mask_mantissa]
+	vpand          xmm4, xmm0, xmm8                     // xmm4 = a & 0x7fffff
+	vpand          xmm5, xmm1, xmm8                     // xmm5 = b & 0x7fffff
+	vbroadcastss   xmm7, [rip + const_exp_1]
+	vpor           xmm4, xmm4, xmm7                     // xmm4 = mantissa(a)
+	vpor           xmm5, xmm5, xmm7                     // xmm5 = mantissa(b)
+	vpshufd        xmm3, xmm4, 0xf5
+	vpmuludq       xmm4, xmm4, xmm5                     // xmm4 = [l] mantissa(a) * mantissa(b)
+	vpshufd        xmm5, xmm5, 0xf5
+	vpmuludq       xmm5, xmm5, xmm3                     // xmm5 = [h] mantissa(a) * mantissa(b)
+	vpshufd        xmm3, xmm5, 0xa0
+	vpblendw       xmm3, xmm3, xmm4, 0x33               // xmm3 = mullo(mantissa(a), mantisssa(b))
+	vpsrlq         xmm4, xmm4, 16
+	vpsllq         xmm5, xmm5, 16
+	vpblendw       xmm4, xmm4, xmm5, 0xcc               // xmm4 = (mantissa(a) * mantissa(b)) >> 16
+	vpandn         xmm3, xmm3, xmm2
+	vbroadcastss   xmm5, [rip + mask_8000]
+	vpand          xmm5, xmm5, xmm3                     // xmm5 = ((a * b) & ~ps2lo) & 0x8000
+	vpsrld         xmm5, xmm5, 15
+	vpsubd         xmm4, xmm4, xmm5                     // xmm4 = ps2mulmantissa(a, b) >> 16
+
+	vbroadcastss   xmm3, [rip + mask_exponent]
+	vpand          xmm2, xmm0, xmm3                     // xmm2 = exponent(a)
+	vpxor          xmm0, xmm0, xmm1
+	vpand          xmm3, xmm3, xmm1                     // xmm3 = exponent(b)
+	vbroadcastss   xmm5, [rip + mask_rest]
+	vpandn         xmm0, xmm5, xmm0                     // xmm0 = sign = (a ^ b) & 0x80000000
+	vpxor          xmm1, xmm1, xmm1
+	vpcmpeqd       xmm6, xmm1, xmm2
+	vpcmpeqd       xmm1, xmm1, xmm3
+	vpor           xmm1, xmm1, xmm6                     // xmm1 = exponent(a) == 0 || exponent(b) == 0
+
+	vpaddd         xmm2, xmm2, xmm3                     // xmm2 = exponent(a) + exponent(b)
+	vpsrld         xmm6, xmm4, 8
+	vpand          xmm9, xmm7, xmm6
+	vpsrld         xmm3, xmm4, 7
+	vblendvps      xmm4, xmm3, xmm6, xmm4               // if (a * b > 0xffffff) mc >>= 1
+	vpand          xmm4, xmm8, xmm4                     // xmm4 = mantissa(c)
+	vbroadcastss   xmm6, [rip + const_exp_n127]
+	vpaddd         xmm2, xmm2, xmm6                     // xmm2 = exponent(a) + exponent(b) - 127
+	vpaddd         xmm2, xmm9, xmm2                     // if (a * b > 0xffffff) xmm2 += 1
+	vpcmpgtd       xmm3, xmm6, xmm2                     // xmm3 = overflow ? ~0 : 0
+	vpandn         xmm3, xmm1, xmm3                     // xmm3 = overflow && no zero exponent ? ~0 : 0
+	vpand          xmm3, xmm3, xmm5
+	vpor           xmm0, xmm0, xmm3                     // if (overflow && no zero exponent) output |= 0x7fffffff
+
+	vpcmpgtd       xmm7, xmm7, xmm2                     // xmm7 = exponent(c) overflowed or underflowed
+	vpor           xmm1, xmm1, xmm7                     // xmm1 = any special case
+	vpor           xmm2, xmm2, xmm0                     // xmm2 = exponent(c) | sign(c)
+	vpor           xmm4, xmm4, xmm2                     // xmm4 = mantissa(c) | exponent(c) | sign(c)
+	vpblendvb      xmm0, xmm4, xmm0, xmm1               // xmm0 = special case ? xmm0 : xmm4
+	ret
+
 .data
 .balign 64
 one_pos:
@@ -648,18 +771,46 @@ mask_exponent:
 .int 0x7f800000
 mask_rest:
 .int 0x7fffffff
-const_700w:
-.short 0x700, 0x700
+const_7b:
+.byte 7, 7, 7, 7
 const_exp_1:
 .int 1 << 23
 const_exp_n127:
 .int -127 << 23
+b_shift_1526: // Shift right with pmulhuw
+.short 0x8000, 0x2000
+a_shift_5162: // Shift left with pmullw
+.short 0x0004, 0x0010
+mask_f0ffw:
+.short 0xf0ff, 0xf0ff
+mask_10000400:
+.short 0x0400, 0x1000
+mask_c0ff:
+.int 0xc0ff
+mask_4000:
+.int 0x4000
+
+.balign 8
+booth_2x_table:
+.byte 0,  0,  0, -1, -1,  0,  0, 0
+booth_neg_table:
+.byte 0,  0,  0,  0, -1, -1, -1, 0
+booth_zero_table:
+.byte 0, -1, -1, -1, -1, -1, -1, 0
 
 .balign 16
+dup_16_to_32_shuf:
+.byte 0, 1, 0, 1, 4, 5, 4, 5, 8, 9, 8, 9, 12, 13, 12, 13
+bswap16_shuf:
+.byte 1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14
+shuf_0437_to_0734:
+.byte 0, 3, 2, 1, 4, 7, 6, 5, 8, 11, 10, 9, 12, 15, 14, 13
+shuf_4073_to_0734:
+.byte 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12
 sse_broadcastw_shuf:
 .byte 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1
-sse_const_700w:
-.short 0x700, 0x700, 0x700, 0x700, 0x700, 0x700, 0x700, 0x700
+sse_const_7b:
+.byte 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
 
 .balign 32
 ymm_b_shuf: // 5241 uses both, 6370 uses the first 16-byte one duplicated

@@ -30,6 +30,7 @@ __m128i ps2mul_one_avx2(__m128i a, __m128i b);
 __m128i ps2mul_one_avx(__m128i a, __m128i b);
 __m128i ps2mul_one_sse4(__m128i a, __m128i b);
 __m128i ps2mul_avx2(__m128i a, __m128i b);
+__m128i ps2mul_avx(__m128i a, __m128i b);
 #endif
 
 #ifdef __cplusplus
