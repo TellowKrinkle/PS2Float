@@ -743,6 +743,137 @@ GNAME(ps2mul_avx):
 	vpblendvb      xmm0, xmm4, xmm0, xmm1               // xmm0 = special case ? xmm0 : xmm4
 	ret
 
+.balign 16
+.globl GNAME(ps2mul_sse4)
+GNAME(ps2mul_sse4):
+	movdqa   xmm6, xmm1
+	movdqa   xmm7, xmm1
+	movaps   xmm2, [rip + dup_16_to_32_shuf]
+	movdqa   xmm9, xmm1
+	pslld    xmm1, 1
+	pshufb   xmm6, xmm2
+	pmulhuw  xmm6, [rip + sse_b_shift_1526]  // xmm6 = b.1526
+	pslld    xmm7, 11
+	pblendw  xmm7, xmm1, 0x55                // xmm7 = b.0437
+	movdqa   xmm4, xmm0
+	movdqa   xmm8, xmm0
+	pshufb   xmm4, xmm2
+	pmullw   xmm4, [rip + sse_a_shift_5162]  // xmm4 = a.5162
+	pslld    xmm0, 22
+	pblendw  xmm0, xmm8, 0x55                // xmm0 = a.4073
+	pshufb   xmm7, [rip + shuf_0437_to_0734] // xmm7 = b.0734
+	movaps   xmm2, [rip + sse_const_7b]
+	pand     xmm7, xmm2                      // xmm7 = b.0734 booth selection bits
+	pand     xmm6, xmm2                      // xmm6 = b.1526 booth selection bits
+	pshufb   xmm0, [rip + shuf_4073_to_0734] // xmm0 = a.0734
+	pshufb   xmm4, [rip + bswap16_shuf]      // xmm4 = a.1526
+	movq     xmm3, [rip + booth_zero_table]
+	movq     xmm5, [rip + booth_2x_table]
+	pshufb   xmm3, xmm7
+	pshufb   xmm5, xmm7
+	pand     xmm5, xmm0
+	pand     xmm3, xmm0
+	paddb    xmm5, xmm3
+	movq     xmm3, [rip + booth_zero_table]
+	movq     xmm1, [rip + booth_2x_table]
+	pshufb   xmm3, xmm6
+	pshufb   xmm1, xmm6
+	pand     xmm3, xmm4
+	pand     xmm4, xmm1
+	paddb    xmm4, xmm3
+	movq     xmm3, [rip + booth_neg_table]
+	movq     xmm2, [rip + booth_neg_table]
+	pshufb   xmm3, xmm7                      // xmm3 = 0734 negate
+	pshufb   xmm2, xmm6                      // xmm2 = 1526 negate
+	pxor     xmm5, xmm3                      // xmm5 = 0734 booth
+	pxor     xmm4, xmm2                      // xmm4 = 1526 booth
+	movaps   xmm0, [rip + sse_mask_f0ffw]
+	pand     xmm0, xmm4                      // xmm0 = 1526 with low bits masked out
+	movdqa   xmm1, xmm0                      // xmm1 = 1526 with low bits masked out
+	psrld    xmm0, 16                        // xmm0 = 26xx
+	movdqa   xmm6, xmm5
+	psrld    xmm6, 16                        // xmm6 = 34xx
+	CSA_SSE  a=xmm0, b=xmm1, c=xmm6, tmp=xmm7, addop=paddb
+	pand     xmm5, [rip + sse_mask_c0ff]     // xmm5 = mask unwanted bits from 07
+	movaps   xmm6, [rip + sse_mask_10000400]
+	pand     xmm2, xmm6                      // xmm2 = b5.negate, b6.negate
+	pand     xmm6, xmm4                      // xmm6 = b5.data & 0x400
+	paddb    xmm6, xmm2
+	por      xmm5, xmm6                      // b7.data |= (b5.data & 0x400) + b5.negate
+	pand     xmm4, [rip + sse_mask_800]      // xmm4 = b5.data & 0x800
+	psrld    xmm2, 16                        // xmm2 = b6.negate
+	por      xmm4, xmm2                      // xmm4 = b6.negate | (b5.data & 0x800)
+	por      xmm1, xmm4                      // t1.hi |= b6.negate | (b5.data & 0x800)
+	CSA_SSE  a=xmm0, b=xmm5, c=xmm1, tmp=xmm7, addop=paddb
+	movdqa   xmm1, xmm0                      // xmm1 = t3.lo
+	movdqa   xmm2, xmm5                      // xmm2 = t3.hi
+	psllw    xmm5, 8                         // xmm5 = t2.hi
+	CSA_SSE  a=xmm0, b=xmm2, c=xmm5, tmp=xmm7, addop=paddb
+	psllw    xmm1, 8                         // xmm0 = t2.lo
+	CSA_SSE  a=xmm0, b=xmm1, c=xmm2, tmp=xmm7, addop=paddb
+	pand     xmm3, [rip + sse_mask_4000]     // xmm7 = b7.negate
+	paddb    xmm1, xmm3                      // t5.hi += b7.negate
+	pxor     xmm0, xmm1                      // xmm0 = ps2lo = t5.lo ^ t5.hi
+
+	movaps   xmm4, [rip + sse_mask_mantissa]
+	movaps   xmm5, [rip + sse_mask_mantissa]
+	pand     xmm4, xmm8
+	pand     xmm5, xmm9
+	por      xmm4, [rip + sse_const_exp_1]   // xmm4 = mantissa(a)
+	por      xmm5, [rip + sse_const_exp_1]   // xmm5 = mantissa(b)
+	pshufd   xmm3, xmm4, 0xf5
+	pmuludq  xmm4, xmm5                      // xmm4 = [l] mantissa(a) * mantissa(b)
+	pshufd   xmm5, xmm5, 0xf5
+	pmuludq  xmm5, xmm3                      // xmm5 = [h] mantissa(a) * mantissa(b)
+	pshufd   xmm3, xmm5, 0xa0
+	pblendw  xmm3, xmm4, 0x33                // xmm3 = mullo(mantissa(a), mantisssa(b))
+	psrlq    xmm4, 16
+	psllq    xmm5, 16
+	pblendw  xmm4, xmm5, 0xcc                // xmm4 = (mantissa(a) * mantissa(b)) >> 16
+	pandn    xmm3, xmm0
+	pand     xmm3, [rip + sse_mask_8000]     // xmm3 = ((a * b) & ~ps2lo) & 0x8000
+	psrld    xmm3, 15
+	psubd    xmm4, xmm3                      // xmm4 = ps2mulmantissa(a, b) >> 16
+
+	movaps   xmm2, [rip + sse_mask_exponent]
+	pand     xmm2, xmm8                      // xmm2 = exponent(a)
+	pxor     xmm8, xmm9
+	movaps   xmm3, [rip + sse_mask_exponent]
+	pand     xmm3, xmm9                      // xmm3 = exponent(b)
+	pand     xmm8, [rip + sse_mask_sign]     // xmm8 = sign = (a ^ b) & 0x80000000
+	pxor     xmm6, xmm6
+	pcmpeqd  xmm6, xmm2
+	pxor     xmm7, xmm7
+	pcmpeqd  xmm7, xmm3
+	por      xmm7, xmm6                      // xmm0 = exponent(a) == 0 || exponent(b) == 0
+
+	paddd    xmm2, xmm3                      // xmm2 = exponent(a) + exponent(b)
+	movdqa   xmm3, xmm4
+	movdqa   xmm0, xmm4
+	psrld    xmm4, 8
+	movdqa   xmm6, [rip + sse_const_exp_1]
+	pand     xmm6, xmm4
+	psrld    xmm3, 7
+	blendvps xmm3, xmm4, xmm0
+	pand     xmm3, [rip + sse_mask_mantissa] // xmm3 = mantissa(c)
+	movaps   xmm5, [rip + sse_const_exp_n127]
+	paddd    xmm2, xmm5                      // xmm2 = exponent(a) + exponent(b) - 127
+	paddd    xmm2, xmm6                      // if (a * b > 0xffffff) xmm2 += 1
+	pcmpgtd  xmm5, xmm2                      // xmm5 = overflow ? ~0 : 0
+	movdqa   xmm1, xmm7
+	pandn    xmm1, xmm5                      // xmm1 = overflow && no zero exponent ? ~0 : 0
+	psrld    xmm1, 1
+	por      xmm1, xmm8                      // if (overflow && no zero exponent) output |= 0x7fffffff
+
+	movaps   xmm0, [rip + sse_const_exp_1]
+	pcmpgtd  xmm0, xmm2                      // xmm0 = exponent(c) overflowed or underflowed
+	por      xmm0, xmm7                      // xmm0 = any special case
+	por      xmm2, xmm1                      // xmm2 = exponent(c) | sign(c)
+	por      xmm3, xmm2                      // xmm3 = mantissa(c) | exponent(c) | sign(c)
+	pblendvb xmm3, xmm1, xmm0                // xmm3 = special case ? xmm1 : xmm3
+	movdqa   xmm0, xmm3
+	ret
+
 .data
 .balign 64
 one_pos:
@@ -811,6 +942,32 @@ sse_broadcastw_shuf:
 .byte 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1
 sse_const_7b:
 .byte 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+sse_mask_mantissa:
+.int 0x007fffff, 0x007fffff, 0x007fffff, 0x007fffff
+sse_mask_exponent:
+.int 0x7f800000, 0x7f800000, 0x7f800000, 0x7f800000
+sse_mask_sign:
+.int 0x80000000, 0x80000000, 0x80000000, 0x80000000
+sse_const_exp_1:
+.int 1 << 23, 1 << 23, 1 << 23, 1 << 23
+sse_const_exp_n127:
+.int -127 << 23, -127 << 23, -127 << 23, -127 << 23
+sse_b_shift_1526:
+.short 0x8000, 0x2000, 0x8000, 0x2000, 0x8000, 0x2000, 0x8000, 0x2000
+sse_a_shift_5162:
+.short 0x0004, 0x0010, 0x0004, 0x0010, 0x0004, 0x0010, 0x0004, 0x0010
+sse_mask_f0ffw:
+.short 0xf0ff, 0xf0ff, 0xf0ff, 0xf0ff, 0xf0ff, 0xf0ff, 0xf0ff, 0xf0ff
+sse_mask_10000400:
+.short 0x0400, 0x1000, 0x0400, 0x1000, 0x0400, 0x1000, 0x0400, 0x1000
+sse_mask_c0ff:
+.int 0xc0ff, 0xc0ff, 0xc0ff, 0xc0ff
+sse_mask_800:
+.int 0x0800, 0x0800, 0x0800, 0x0800
+sse_mask_4000:
+.int 0x4000, 0x4000, 0x4000, 0x4000
+sse_mask_8000:
+.int 0x8000, 0x8000, 0x8000, 0x8000
 
 .balign 32
 ymm_b_shuf: // 5241 uses both, 6370 uses the first 16-byte one duplicated
