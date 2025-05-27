@@ -17,6 +17,11 @@ struct Test {
 	u32 c;
 };
 
+struct UnaryTest {
+	u32 in;
+	u32 out;
+};
+
 static constexpr Test TESTS_ADD[] = {
 	{ 0x3f800000, 0xbcf776f9, 0x3f784449 },
 	{ 0x7f7fffff, 0x7fffffff, 0x7fffffff },
@@ -65,15 +70,60 @@ static constexpr Test TESTS_MUL[] = {
 	{ 0x3f080000, 0x00c80000, 0x00000000 },
 };
 
-struct TestList {
-	const Test* begin_;
-	const Test* end_;
-	const Test* begin() const { return begin_; }
-	const Test* end()   const { return end_; }
-	constexpr TestList(const Test* ptr, size_t size): begin_(ptr), end_(ptr + size) {}
-	template <int N>
-	constexpr TestList(const Test(&list)[N]): begin_(list), end_(list + N) {}
+static constexpr Test TESTS_DIV[] = {
+	{0x3f800000, 0x3F800000, 0x3f800000},
+	{0x3f800000, 0x7fffffff, 0x00000000},
+	{0x3f800000, 0x00800000, 0x7e800000},
+	{0x40000000, 0x00800000, 0x7f000000},
+	{0x40800000, 0x00800000, 0x7f800000},
+	{0x41000000, 0x00800000, 0x7fffffff},
+	{0x40ffffff, 0x00800000, 0x7fffffff},
+	{0x40fffffe, 0x00800000, 0x7ffffffe},
+	{0x40ffffff, 0x7fffffff, 0x00800000},
+	{0x40fffffe, 0x7fffffff, 0x00000000},
+	{0x00000000, 0x00000000, 0x7fffffff},
+	{0x007fffff, 0x007fffff, 0x7fffffff},
+	{0x00800000, 0x007fffff, 0x7fffffff},
+	{0x007fffff, 0x00800000, 0x00000000},
+	{0x80000000, 0x80000000, 0x7fffffff},
+	{0x007fffff, 0x807fffff, 0xffffffff},
+	{0x80800000, 0x007fffff, 0xffffffff},
+	{0x807fffff, 0x00800000, 0x80000000},
+	{0x40000000, 0x3fb504f3, 0x3fb504f3},
+	{0x40490fda, 0x3fb504f2, 0x400e2c19},
+	{0x40490fda, 0x3fb504f3, 0x400e2c18},
+	{0x40490fda, 0x3fb504f4, 0x400e2c18},
 };
+
+static constexpr UnaryTest TESTS_SQRT[] = {
+	{0x3f800000, 0x3f800000},
+	{0x7fffffff, 0x5fB504f3},
+	{0xffffffff, 0x5fB504f3},
+	{0x00800000, 0x20000000},
+	{0x007fffff, 0x00000000},
+	{0x807fffff, 0x00000000},
+	{0x40000000, 0x3fb504f3},
+	{0x40490fda, 0x3fe2dfc4},
+	{0x40000001, 0x3fb504f4},
+	{0x40000002, 0x3fb504f4},
+	{0x40000003, 0x3fb504f5},
+	{0x40000004, 0x3fb504f6},
+	{0x40000005, 0x3fb504f6},
+};
+
+template <typename T>
+struct ConstArrayRef {
+	const T* begin_;
+	const T* end_;
+	const T* begin() const { return begin_; }
+	const T* end()   const { return end_; }
+	constexpr ConstArrayRef(const T* ptr, size_t size): begin_(ptr), end_(ptr + size) {}
+	template <int N>
+	constexpr ConstArrayRef(const T(&list)[N]): begin_(list), end_(list + N) {}
+};
+
+typedef ConstArrayRef<Test> TestList;
+typedef ConstArrayRef<UnaryTest> UnaryTestList;
 
 static bool run_tests(u32(*fn)(u32, u32), TestList tests, const char* op, const char* name, bool printHeader, bool printSuccess) {
 	if (printHeader)
@@ -87,6 +137,23 @@ static bool run_tests(u32(*fn)(u32, u32), TestList tests, const char* op, const 
 				printf("%08x %s %08x = %08x\n", test.a, op, test.b, res);
 		} else {
 			printf("%08x %s %08x =[%s] %08x != %08x\n", test.a, op, test.b, name, res, test.c);
+		}
+	}
+	return ok;
+}
+
+static bool run_tests(u32(*fn)(u32), UnaryTestList tests, const char* op, const char* name, bool printHeader, bool printSuccess) {
+	if (printHeader)
+		printf("Testing %s...\n", name);
+	bool ok = true;
+	for (const UnaryTest& test : tests) {
+		uint32_t res = fn(test.in);
+		ok &= res == test.out;
+		if (res == test.out) {
+			if (printSuccess)
+				printf("%s(%08x) = %08x\n", op, test.in, res);
+		} else {
+			printf("%s(%08x) =[%s] %08x != %08x\n", op, test.in, name, res, test.out);
 		}
 	}
 	return ok;
@@ -187,10 +254,35 @@ static bool test_mul(TestList tests, bool print) {
 	return ok;
 }
 
+static bool test_div(TestList tests, bool print) {
+	bool ok = true;
+	ok &= run_tests(ps2div, tests, "/", "Div C", print, print);
+	return ok;
+}
+
+static bool test_sqrt(UnaryTestList tests, bool print) {
+	bool ok = true;
+	ok &= run_tests(ps2sqrt, tests, "sqrt", "Sqrt C", print, print);
+	return ok;
+}
+
 enum class Mode {
 	Add,
 	Mul,
+	Div,
+	Sqrt,
 };
+
+static constexpr size_t getTestSize(Mode mode) {
+	switch (mode) {
+		case Mode::Add:
+		case Mode::Mul:
+		case Mode::Div:
+			return sizeof(Test);
+		case Mode::Sqrt:
+			return sizeof(UnaryTest);
+	}
+}
 
 int main(int argc, const char * argv[]) {
 	bool ok = true;
@@ -204,13 +296,17 @@ int main(int argc, const char * argv[]) {
 			mode = Mode::Add;
 		} else if (0 == strcasecmp(argv[1], "mul")) {
 			mode = Mode::Mul;
+		} else if (0 == strcasecmp(argv[1], "div")) {
+			mode = Mode::Div;
+		} else if (0 == strcasecmp(argv[1], "sqrt")) {
+			mode = Mode::Sqrt;
 		} else {
 			fprintf(stderr, "Unrecognized test mode %s\n", argv[1]);
 			return EXIT_FAILURE;
 		}
 
 		constexpr size_t maxtests = 65536;
-		Test* buffer = static_cast<Test*>(malloc(sizeof(Test) * maxtests));
+		void* buffer = malloc(getTestSize(mode) * maxtests);
 		uint64_t total = 0;
 		for (int i = 2; i < argc; i++) {
 			bool useStdin = 0 == strcmp(argv[i], "-");
@@ -220,11 +316,12 @@ int main(int argc, const char * argv[]) {
 				continue;
 			}
 			while (true) {
-				size_t ntests = fread(buffer, sizeof(Test), maxtests, file);
+				size_t ntests = fread(buffer, getTestSize(mode), maxtests, file);
 				if (ntests == 0)
 					break;
 				total += ntests;
-				TestList tests = TestList(buffer, ntests);
+				TestList tests = TestList(static_cast<Test*>(buffer), ntests);
+				UnaryTestList unaryTests = UnaryTestList(static_cast<UnaryTest*>(buffer), ntests);
 				switch (mode) {
 					case Mode::Add:
 						ok &= test_add(tests, false);
@@ -232,6 +329,12 @@ int main(int argc, const char * argv[]) {
 						break;
 					case Mode::Mul:
 						ok &= test_mul(tests, false);
+						break;
+					case Mode::Div:
+						ok &= test_div(tests, false);
+						break;
+					case Mode::Sqrt:
+						ok &= test_sqrt(unaryTests, false);
 						break;
 				}
 			}
@@ -246,6 +349,8 @@ int main(int argc, const char * argv[]) {
 		ok &= test_add(TESTS_ADD, true);
 		ok &= test_add_int(TESTS_ADD, true);
 		ok &= test_mul(TESTS_MUL, true);
+		ok &= test_div(TESTS_DIV, true);
+		ok &= test_sqrt(TESTS_SQRT, true);
 	}
 	if (ok)
 		puts("All Pass");
