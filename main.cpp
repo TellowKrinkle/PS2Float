@@ -8,6 +8,7 @@
 
 #pragma STDC FENV_ACCESS ON
 
+typedef uint64_t u64;
 typedef uint32_t u32;
 typedef uint16_t u16;
 
@@ -114,12 +115,13 @@ static constexpr UnaryTest TESTS_SQRT[] = {
 template <typename T>
 struct ConstArrayRef {
 	const T* begin_;
-	const T* end_;
+	size_t size_;
 	const T* begin() const { return begin_; }
-	const T* end()   const { return end_; }
-	constexpr ConstArrayRef(const T* ptr, size_t size): begin_(ptr), end_(ptr + size) {}
+	const T* end()   const { return begin_ + size_; }
+	size_t size()    const { return size_; }
+	constexpr ConstArrayRef(const T* ptr, size_t size): begin_(ptr), size_(size) {}
 	template <int N>
-	constexpr ConstArrayRef(const T(&list)[N]): begin_(list), end_(list + N) {}
+	constexpr ConstArrayRef(const T(&list)[N]): begin_(list), size_(N) {}
 };
 
 typedef ConstArrayRef<Test> TestList;
@@ -266,10 +268,39 @@ static bool test_sqrt(UnaryTestList tests, bool print) {
 	return ok;
 }
 
+/// Expand a 1-bit-per-test format where the one bit represents whether the given test rounded up or not
+/// (Test is for mantissas only, so we just toss in a `0x3f800000` exponent to put them near 1)
+static void expand_div_bit(Test* out, ConstArrayRef<u32> tests, u32* pdividend, u32* pdivisor) {
+	u32 dividend = *pdividend;
+	u32 divisor = *pdivisor;
+	for (u32 test : tests) {
+		for (u32 i = 0; i < 32; i++, dividend++) {
+			u32 expected = static_cast<u32>((static_cast<u64>(dividend) << 24) / divisor);
+			if (expected >= 1 << 24) {
+				expected = (expected >> 1); // Upper 1 bit stays in exponent to turn 0x3f000000 to 0x3f800000
+			} else {
+				expected = (expected & 0x7fffff);
+			}
+			expected |= 0x3f000000;
+			// Input data is one bit indicating if the PS2 rounded up
+			// For exact results, the bit should be unset, so we can just add it
+			expected += (test >> i) & 1;
+			*out++ = { 0x3f800000 | dividend, 0x3f800000 | divisor, expected };
+		}
+		if (dividend == 1 << 24) {
+			dividend = 1 << 23;
+			divisor++;
+		}
+	}
+	*pdividend = dividend;
+	*pdivisor = divisor;
+}
+
 enum class Mode {
 	Add,
 	Mul,
 	Div,
+	DivBit,
 	Sqrt,
 };
 
@@ -279,9 +310,55 @@ static constexpr size_t getTestSize(Mode mode) {
 		case Mode::Mul:
 		case Mode::Div:
 			return sizeof(Test);
+		case Mode::DivBit:
+			return sizeof(uint32_t);
 		case Mode::Sqrt:
 			return sizeof(UnaryTest);
 	}
+}
+
+static bool parseDivisor(u32* out, const char* str) {
+	char* end;
+	unsigned long res = strtoul(str, &end, 16);
+	if (end == str) {
+		fprintf(stderr, "%s is not a hex number\n", str);
+		return false;
+	}
+	if (res < 0x800000) {
+		fprintf(stderr, "Divisor %lx is too small (must be at least 0x800000)\n", res);
+		return false;
+	}
+	if (res > 0xffffff) {
+		fprintf(stderr, "Divisor %lx is too large (must be at most 0xffffff)\n", res);
+		return false;
+	}
+	*out = static_cast<u32>(res);
+	return true;
+}
+
+static bool ishex(char c) {
+	if (c >= '0' && c <= '9')
+		return true;
+	if (c >= 'a' && c <= 'f')
+		return true;
+	if (c >= 'A' && c <= 'F')
+		return true;
+	return false;
+}
+
+static bool parseDivisorFromFilename(u32* out, const char* str) {
+	const char* end = str + strlen(str);
+	u32 numhex = 0;
+	while (end > str) {
+		--end;
+		if (ishex(*end)) {
+			if (++numhex == 6 && parseDivisor(out, end))
+				return true;
+		} else {
+			numhex = 0;
+		}
+	}
+	return false;
 }
 
 int main(int argc, const char * argv[]) {
@@ -298,6 +375,8 @@ int main(int argc, const char * argv[]) {
 			mode = Mode::Mul;
 		} else if (0 == strcasecmp(argv[1], "div")) {
 			mode = Mode::Div;
+		} else if (0 == strcasecmp(argv[1], "divbit")) {
+			mode = Mode::DivBit;
 		} else if (0 == strcasecmp(argv[1], "sqrt")) {
 			mode = Mode::Sqrt;
 		} else {
@@ -307,9 +386,30 @@ int main(int argc, const char * argv[]) {
 
 		constexpr size_t maxtests = 65536;
 		void* buffer = malloc(getTestSize(mode) * maxtests);
-		uint64_t total = 0;
+		Test* expand = nullptr;
+		if (mode == Mode::DivBit) {
+			expand = static_cast<Test*>(malloc(sizeof(Test) * maxtests * 32));
+		}
+		u64 total = 0;
+		bool startOverride = false;
+		u32 dividend = 0x800000;
+		u32 divisor = 0x800000;
 		for (int i = 2; i < argc; i++) {
 			bool useStdin = 0 == strcmp(argv[i], "-");
+
+			if (mode == Mode::DivBit && i + 1 < argc && 0 == strcasecmp(argv[i], "--start")) {
+				if (parseDivisor(&divisor, argv[i + 1])) {
+					i += 1;
+					dividend = 0x800000;
+					startOverride = true;
+					continue;
+				}
+			}
+			if (mode == Mode::DivBit && !startOverride) {
+				if (parseDivisorFromFilename(&divisor, argv[i]))
+					dividend = 0x800000;
+			}
+
 			FILE* file = useStdin ? stdin : fopen(argv[i], "r");
 			if (!file) {
 				fprintf(stderr, "Failed to open %s for reading: %s\n", argv[i], strerror(errno));
@@ -333,6 +433,10 @@ int main(int argc, const char * argv[]) {
 					case Mode::Div:
 						ok &= test_div(tests, false);
 						break;
+					case Mode::DivBit:
+						expand_div_bit(expand, ConstArrayRef<u32>(static_cast<u32*>(buffer), ntests), &dividend, &divisor);
+						ok &= test_div(TestList(expand, ntests * 32), false);
+						break;
 					case Mode::Sqrt:
 						ok &= test_sqrt(unaryTests, false);
 						break;
@@ -342,8 +446,12 @@ int main(int argc, const char * argv[]) {
 				fprintf(stderr, "Failed to read file %s: %s\n", argv[i], strerror(ferror(file)));
 			if (!useStdin)
 				fclose(file);
-			free(buffer);
 		}
+		free(buffer);
+		if (expand)
+			free(expand);
+		if (mode == Mode::DivBit)
+			total *= 32;
 		printf("Ran %lld tests\n", total);
 	} else {
 		ok &= test_add(TESTS_ADD, true);
