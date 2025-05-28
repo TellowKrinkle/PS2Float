@@ -12,6 +12,12 @@ typedef uint64_t u64;
 typedef uint32_t u32;
 typedef uint16_t u16;
 
+static bool test_c;
+static bool test_asm;
+static bool test_sse4;
+static bool test_avx;
+static bool test_avx2;
+
 struct Test {
 	u32 a;
 	u32 b;
@@ -208,14 +214,16 @@ static bool test_add(TestList tests, bool print) {
 	fegetenv(&fenv);
 	setup_fenv();
 	bool ok = true;
-	ok &= run_tests(ps2add, tests, "+", "Accelerated Add C", print, print);
+	if (test_c)
+		ok &= run_tests(ps2add, tests, "+", "Accelerated Add C", print, print);
 #ifdef __x86_64__
-	ok &= run_tests(ps2add_asm, tests, "+", "Accelerated Add ASM", print, false);
-	if (__builtin_cpu_supports("avx2"))
+	if (test_asm)
+		ok &= run_tests(ps2add_asm, tests, "+", "Accelerated Add ASM", print, false);
+	if (test_avx2)
 		ok &= run_tests(ps2add_avx2, tests, "+", "Accelerated Add AVX2", print);
-	if (__builtin_cpu_supports("avx"))
+	if (test_avx)
 		ok &= run_tests(ps2add_avx,  tests, "+", "Accelerated Add AVX",  print);
-	if (__builtin_cpu_supports("sse4.1"))
+	if (test_sse4)
 		ok &= run_tests(ps2add_sse4, tests, "+", "Accelerated Add SSE4", print);
 #endif
 	fesetenv(&fenv);
@@ -224,12 +232,14 @@ static bool test_add(TestList tests, bool print) {
 
 static bool test_add_int(TestList tests, bool print) {
 	bool ok = true;
-	ok &= run_tests(ps2add_int, tests, "+", "Add C", print, false);
+	if (test_c)
+		ok &= run_tests(ps2add_int, tests, "+", "Add C", print, false);
 #ifdef __x86_64__
-	ok &= run_tests(ps2add_int_asm, tests, "+", "Add ASM", print, false);
-	if (__builtin_cpu_supports("avx"))
+	if (test_asm)
+		ok &= run_tests(ps2add_int_asm, tests, "+", "Add ASM", print, false);
+	if (test_avx)
 		ok &= run_tests(ps2add_int_avx, tests, "+", "Add AVX", print);
-	if (__builtin_cpu_supports("sse4.1"))
+	if (test_sse4)
 		ok &= run_tests(ps2add_int_sse4, tests, "+", "Add SSE4", print);
 #endif
 	return ok;
@@ -237,18 +247,20 @@ static bool test_add_int(TestList tests, bool print) {
 
 static bool test_mul(TestList tests, bool print) {
 	bool ok = true;
-	ok &= run_tests(ps2mul, tests, "*", "Mul C", print, print);
+	if (test_c)
+		ok &= run_tests(ps2mul, tests, "*", "Mul C", print, print);
 #ifdef __x86_64__
-	ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
-	if (__builtin_cpu_supports("avx2")) {
+	if (test_asm)
+		ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
+	if (test_avx2) {
 		ok &= run_tests(ps2mul_one_avx2, tests, "*", "Mul One AVX2", print);
 		ok &= run_tests(ps2mul_avx2, tests, "*", "Mul AVX2", print);
 	}
-	if (__builtin_cpu_supports("avx")) {
+	if (test_avx) {
 		ok &= run_tests(ps2mul_one_avx, tests, "*", "Mul One AVX", print);
 		ok &= run_tests(ps2mul_avx, tests, "*", "Mul AVX", print);
 	}
-	if (__builtin_cpu_supports("sse4.1")) {
+	if (test_sse4) {
 		ok &= run_tests(ps2mul_one_sse4, tests, "*", "Mul One SSE4", print);
 		ok &= run_tests(ps2mul_sse4, tests, "*", "Mul SSE4", print);
 	}
@@ -258,13 +270,15 @@ static bool test_mul(TestList tests, bool print) {
 
 static bool test_div(TestList tests, bool print) {
 	bool ok = true;
-	ok &= run_tests(ps2div, tests, "/", "Div C", print, print);
+	if (test_c)
+		ok &= run_tests(ps2div, tests, "/", "Div C", print, print);
 	return ok;
 }
 
 static bool test_sqrt(UnaryTestList tests, bool print) {
 	bool ok = true;
-	ok &= run_tests(ps2sqrt, tests, "sqrt", "Sqrt C", print, print);
+	if (test_c)
+		ok &= run_tests(ps2sqrt, tests, "sqrt", "Sqrt C", print, print);
 	return ok;
 }
 
@@ -362,6 +376,14 @@ static bool parseDivisorFromFilename(u32* out, const char* str) {
 }
 
 int main(int argc, const char * argv[]) {
+	test_c = true;
+#ifdef __x86_64__
+	test_asm  = true;
+	test_sse4 = __builtin_cpu_supports("sse4.1");
+	test_avx  = __builtin_cpu_supports("avx");
+	test_avx2 = __builtin_cpu_supports("avx2");
+#endif
+
 	bool ok = true;
 	if (argc > 1) {
 		if (argc <= 2) {
@@ -396,6 +418,23 @@ int main(int argc, const char * argv[]) {
 		u32 divisor = 0x800000;
 		for (int i = 2; i < argc; i++) {
 			bool useStdin = 0 == strcmp(argv[i], "-");
+
+			if (0 == strcasecmp(argv[i], "--no-c")) {
+				test_c = false;
+				continue;
+			} else if (0 == strcasecmp(argv[i], "--no-asm")) {
+				test_asm = false;
+				continue;
+			} else if (0 == strcasecmp(argv[i], "--no-sse4")) {
+				test_sse4 = false;
+				continue;
+			} else if (0 == strcasecmp(argv[i], "--no-avx")) {
+				test_avx = false;
+				continue;
+			} else if (0 == strcasecmp(argv[i], "--no-avx2")) {
+				test_avx2 = false;
+				continue;
+			}
 
 			if (mode == Mode::DivBit && i + 1 < argc && 0 == strcasecmp(argv[i], "--start")) {
 				if (parseDivisor(&divisor, argv[i + 1])) {
