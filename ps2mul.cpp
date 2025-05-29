@@ -69,10 +69,10 @@ static u64 ps2mulmantissa(u32 a, u32 b) {
 }
 
 u32 ps2mul(u32 a, u32 b) {
-	u32 ma = (a & 0x7fffff) | 0x800000;
-	u32 mb = (b & 0x7fffff) | 0x800000;
-	int ea = (a >> 23) & 0xff;
-	int eb = (b >> 23) & 0xff;
+	u32 ma = mantissa(a);
+	u32 mb = mantissa(b);
+	int ea = exponent(a);
+	int eb = exponent(b);
 	u32 sign = (a ^ b) & 0x80000000;
 	if (!ea || !eb)
 		return sign;

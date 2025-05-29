@@ -4,6 +4,16 @@
 #include <immintrin.h>
 #endif
 
+/// Get the mantissa of a float, as a 24-bit unsigned integer
+static inline uint32_t mantissa(uint32_t x) {
+	return (x & 0x7fffff) | 0x800000;
+}
+
+/// Get the raw (biased) exponent of a float, as an 8-bit unsigned integer
+static uint32_t exponent(uint32_t x) {
+	return (x >> 23) & 0xff;
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif

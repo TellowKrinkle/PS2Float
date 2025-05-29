@@ -11,8 +11,8 @@ typedef  int32_t s32;
 u32 ps2add(u32 a, u32 b) {
 	if ((a & 0x7fffffff) < (b & 0x7fffffff))
 		std::swap(a, b); // Make a the larger of the two
-	u8 aexp = ((a >> 23) & 0xff);
-	u8 bexp = ((b >> 23) & 0xff);
+	u8 aexp = exponent(a);
+	u8 bexp = exponent(b);
 	u8 shift = aexp - bexp;
 	// We don't want the exponent to reach 255 after adding, since this would clamp to INF on IEEE
 	// Adding two numbers with exponent 254 could end with an exponent 255, so adjust for either of those cases
@@ -37,15 +37,15 @@ u32 ps2add_int(u32 a, u32 b) {
 	static constexpr u32 SIGN = 0x80000000;
 	if ((a & 0x7fffffff) < (b & 0x7fffffff))
 		std::swap(a, b); // Make a the larger of the two
-	u8 aexp = ((a >> 23) & 0xff);
-	u8 bexp = ((b >> 23) & 0xff);
+	u8 aexp = exponent(a);
+	u8 bexp = exponent(b);
 	if (!bexp)
 		return aexp ? a : a & b & SIGN;
 	if (a == (b ^ SIGN))
 		return 0;
 	u8 shift = aexp - bexp;
-	u32 amant = ((a & 0x7fffff) | 0x800000) << 1;
-	u32 bmant = ((b & 0x7fffff) | 0x800000) << 1;
+	u32 amant = mantissa(a) << 1;
+	u32 bmant = mantissa(b) << 1;
 	if (shift > 24)
 		bmant = 0;
 	else

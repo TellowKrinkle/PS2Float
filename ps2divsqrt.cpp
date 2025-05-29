@@ -17,14 +17,6 @@ static CSAResult CSA(u32 a, u32 b, u32 c) {
 	return { l, h << 1 };
 }
 
-static u32 mantissa(u32 x) {
-	return (x & 0x7fffff) | 0x800000;
-}
-
-static u32 exponent(u32 x) {
-	return (x >> 23) & 0xff;
-}
-
 static int quotientSelect(CSAResult current) {
 	// Note: Decimal point is between bits 24 and 25
 	u32 mask = (1 << 24) - 1; // Bit 23 needs to be or'd in instead of added
