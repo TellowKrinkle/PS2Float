@@ -11,10 +11,9 @@ struct CSAResult {
 };
 
 static CSAResult CSA(u32 a, u32 b, u32 c) {
-	u32 u = a ^ b;
-	u32 h = (a & b) | (u & c);
-	u32 l = u ^ c;
-	return { l, h << 1 };
+	u32 lo = a ^ b ^ c;
+	u32 hi = a + b + c - lo;
+	return { lo, hi };
 }
 
 static int quotientSelect(CSAResult current) {

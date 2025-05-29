@@ -26,10 +26,9 @@ static BoothRecode booth(u32 a, u32 b, u32 bit) {
 
 // Add 3 rows of bits in parallel
 static AddResult Add3(u32 a, u32 b, u32 c) {
-	u32 u = a ^ b;
-	u32 lo = u ^ c;
-	u32 hi = (u & c) | (a & b);
-	return { lo, hi << 1 };
+	u32 lo = a ^ b ^ c;
+	u32 hi = a + b + c - lo;
+	return { lo, hi };
 }
 
 static u64 ps2mulmantissa(u32 a, u32 b) {
