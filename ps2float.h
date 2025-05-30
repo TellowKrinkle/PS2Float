@@ -25,6 +25,8 @@ uint32_t ps2add_int(uint32_t a, uint32_t b);
 static inline uint32_t ps2sub(uint32_t a, uint32_t b) { return ps2add(a, b ^ 0x80000000); }
 /// Multiply two PS2 floating point numbers.
 uint32_t ps2mul(uint32_t a, uint32_t b);
+/// Alternative, faster ps2mul implementation
+uint32_t ps2mul_swar(uint32_t a, uint32_t b);
 /// Divide two PS2 floating point numbers
 uint32_t ps2div(uint32_t a, uint32_t b);
 /// Get the square root of a PS2 floating point number

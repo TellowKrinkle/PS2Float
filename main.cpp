@@ -247,8 +247,10 @@ static bool test_add_int(TestList tests, bool print) {
 
 static bool test_mul(TestList tests, bool print) {
 	bool ok = true;
-	if (test_c)
+	if (test_c) {
 		ok &= run_tests(ps2mul, tests, "*", "Mul C", print, print);
+		ok &= run_tests(ps2mul_swar, tests, "*", "Mul C SWAR", print, false);
+	}
 #ifdef __x86_64__
 	if (test_asm)
 		ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
