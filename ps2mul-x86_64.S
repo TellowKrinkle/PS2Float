@@ -132,6 +132,13 @@
 .endif
 .endm
 
+.macro CSA_AVX512 a, b, c, tmp, addop=vpaddw
+	vmovdqa    \tmp, \a
+	vpternlogd \a,   \b, \c, 0x96
+	vpternlogd \tmp, \b, \c, 0xe8
+	\addop     \b, \tmp, \tmp
+.endm
+
 .balign 16
 .globl GNAME(ps2mul_asm)
 GNAME(ps2mul_asm):
@@ -554,6 +561,100 @@ Lps2mul_sse4_out_of_range:
 	mov          eax, ecx
 	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
 	jmp          Lps2mul_sse4_done
+
+.balign 16
+.globl GNAME(ps2mul_one_avx512)
+GNAME(ps2mul_one_avx512):
+	vpshufb      xmm3, xmm1, [rip + one_b_shuf]
+	vpmullw      xmm3, xmm3, [rip + one_b_shift]           // xmm3 = b << (bit * 2 + 7)
+	vpbroadcastw xmm2, xmm0
+	vmovdqa      xmm5, [rip + one_pos]
+	vpmullw      xmm2, xmm2, xmm5                          // xmm2 = a << (bit * 2)
+	vpandd       xmm3, xmm3, [rip + const_7b]{1to4}        // xmm3 = test = (b << (bit * 2 - 1)) & 7
+	vmovq        xmm4, [rip + booth_table]
+	vpshufb      xmm4, xmm4, xmm3                          // xmm4 = booth[test] << 8
+	vpsraw       xmm3, xmm4, 8                             // xmm3 = booth[test]
+	vpmullw      xmm2, xmm2, xmm3                          // xmm2 = a * booth[test]
+	vpsraw       xmm4, xmm4, 15                            // xmm4 = booth[test] < 0 ? ~0 : 0
+	vpand        xmm4, xmm4, xmm5                          // xmm4 = negate[test]
+	vpsubw       xmm2, xmm2, xmm4                          // xmm2 = booth(a) (correct negate to invert)
+	vmovd        eax, xmm0
+	vmovd        edx, xmm1
+	vmovd        xmm1, [rip + mask_fff]
+	vpandn       xmm1, xmm1, xmm2                          // xmm1 = b5.data & ~0xfffu, b2.data
+	vpsrlq       xmm0, xmm2, 32                            // xmm0 = b4.data,           b1.data
+	vpunpckhqdq  xmm3, xmm2, xmm2                          // xmm3 = b6.data,           b3.data
+	CSA_AVX512 a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	vpunpckhqdq  xmm3, xmm4, xmm4                          // xmm3 = b6.negate, b3.negate
+	vpternlogd   xmm3, xmm2, [rip + mask_800 ]{1to4}, 0xf8 // xmm3 = b6.negate | (b5.data & 0x800), b3.negate
+	vpternlogd   xmm1, xmm3, [rip + mask_ffff]{1to4}, 0xf8 // t1.hi |= b6.negate | (b5.data & 0x800)
+	vpshufd      xmm3, xmm2, 3                             // xmm3 = b7.data, b0.data
+	vpandd       xmm5, xmm2, [rip + mask_400 ]{1to4}       // xmm5 = b5.data & 0x400
+	vpaddw       xmm5, xmm5, xmm4                          // xmm5 = (b5.data & 0x400) + b5.negate, 0, xxx...
+	vpor         xmm3, xmm3, xmm5                          // b7.data |= (b5.data & 0x400) + b5.negate
+	CSA_AVX512 a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	vpsrld       xmm3, xmm5, 15                            // xmm3 = t2.hi
+	vpsrld       xmm2, xmm0, 16                            // xmm2 = t2.lo
+	CSA_AVX512 a=xmm0, b=xmm1, c=xmm3, tmp=xmm5
+	CSA_AVX512 a=xmm0, b=xmm1, c=xmm2, tmp=xmm5
+	vpshufd      xmm4, xmm4, 3
+	vpaddd       xmm1, xmm1, xmm4                          // t5.hi += b7.negate
+	vpxor        xmm0, xmm0, xmm1                          // xmm0 = ps2lo = t5.lo ^ t5.hi
+
+	mov          esi, eax
+	mov          edi, edx
+	and          esi, 0x7fffff
+	and          edi, 0x7fffff
+	or           esi, 0x800000
+	or           edi, 0x800000
+	imul         rsi, rdi                        // rsi = full
+
+	vmovd        edi, xmm0
+	and          edi, 0x8000
+	sub          rsi, rdi
+	shr          rsi, 23                         // rsi = mc
+
+	mov          ecx, eax
+	xor          ecx, edx
+	and          ecx, 0x80000000                 // ecx = sign = (a ^ b) & 0x80000000
+	and          eax, 0x7f800000                 // eax = exponent(a)
+	jz           Lps2mul_avx512_mul_zero
+	and          edx, 0x7f800000                 // edx = exponent(b)
+	jz           Lps2mul_avx512_mul_zero
+
+	add          eax, edx
+	sub          eax, (127 << 23)                // eax = exponent(a) + exponent(b) - 127
+
+	mov          edx, esi
+	shr          esi, 1
+	mov          edi, esi
+	and          esi, 0x800000
+	cmovz        edi, edx
+	add          eax, esi
+	and          edi, 0x7fffff
+
+	cmp          eax, (1 << 23)
+	jl           Lps2mul_avx512_out_of_range
+
+	or           eax, ecx
+	or           eax, edi
+
+Lps2mul_avx512_done:
+	vmovd        xmm0, eax
+	vpbroadcastd xmm0, xmm0                      // Not really necessary, but tests want the result in all lanes to verify multilane vector functions
+	ret
+
+Lps2mul_avx512_mul_zero:
+	mov          eax, ecx                        // return sign
+	jmp          Lps2mul_avx512_done
+
+Lps2mul_avx512_out_of_range:
+	mov          edx, ecx
+	or           edx, 0x7fffffff                 // edx = sign | 0x7fffffff
+	cmp          eax, (-127 << 23)
+	mov          eax, ecx
+	cmovl        eax, edx                        // return overflow ? sign | 0x7fffffff : sign
+	jmp          Lps2mul_avx512_done
 
 // Note: According to uica.uops.info, this isn't actually any faster than the avx version
 // (And it'll definitely be slower on Zen 1 where ymm ops are split into two uops.)

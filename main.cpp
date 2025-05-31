@@ -17,6 +17,7 @@ static bool test_asm;
 static bool test_sse4;
 static bool test_avx;
 static bool test_avx2;
+static bool test_avx512f;
 
 struct Test {
 	u32 a;
@@ -254,6 +255,8 @@ static bool test_mul(TestList tests, bool print) {
 #ifdef __x86_64__
 	if (test_asm)
 		ok &= run_tests(ps2mul_asm, tests, "*", "Mul ASM", print, false);
+	if (test_avx512f)
+		ok &= run_tests(ps2mul_one_avx512, tests, "*", "Mul One AVX512", print);
 	if (test_avx2) {
 		ok &= run_tests(ps2mul_one_avx2, tests, "*", "Mul One AVX2", print);
 		ok &= run_tests(ps2mul_avx2, tests, "*", "Mul AVX2", print);
@@ -384,6 +387,7 @@ int main(int argc, const char * argv[]) {
 	test_sse4 = __builtin_cpu_supports("sse4.1");
 	test_avx  = __builtin_cpu_supports("avx");
 	test_avx2 = __builtin_cpu_supports("avx2");
+	test_avx512f = __builtin_cpu_supports("avx512f");
 #endif
 
 	bool ok = true;
@@ -435,6 +439,9 @@ int main(int argc, const char * argv[]) {
 				continue;
 			} else if (0 == strcasecmp(argv[i], "--no-avx2")) {
 				test_avx2 = false;
+				continue;
+			} else if (0 == strcasecmp(argv[i], "--no-avx512")) {
+				test_avx512f = false;
 				continue;
 			}
 
