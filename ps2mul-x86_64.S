@@ -1033,6 +1033,128 @@ GNAME(ps2mul_sse4):
 	movdqa   xmm0, xmm3
 	ret
 
+.balign 16
+.globl GNAME(ps2mul_avx512)
+GNAME(ps2mul_avx512):
+	vpbroadcastq   xmm6, [rip + mshift_b_1526]
+	vpmultishiftqb xmm6, xmm6, xmm1                        // xmm6 = b.1526
+	vpbroadcastq   xmm7, [rip + mshift_b_0734]
+	vpmultishiftqb xmm7, xmm7, xmm1                        // xmm7 = b.0734
+	vpandd         xmm2, xmm0, [rip + mask_ffff]{1to4}     // Multishift rotates, and we don't want high bits coming in the bottom
+	vpbroadcastq   xmm4, [rip + mshift_a_1526]
+	vpmultishiftqb xmm4, xmm4, xmm2                        // xmm4 = a.1526
+	vpbroadcastq   xmm5, [rip + mshift_a_0734]
+	vpmultishiftqb xmm5, xmm5, xmm2                        // xmm5 = a.0734
+	vpandd       xmm6, xmm6, [rip + const_7b]{1to4}        // xmm6 = b.1526 booth selection bits
+	vpandd       xmm7, xmm7, [rip + mask_b_0734]{1to4}     // xmm7 = b.0734 booth selection bits
+	vmovq        xmm8,  [rip + booth_2x_table]
+	vmovq        xmm9,  [rip + booth_zero_table]
+	vmovq        xmm10, [rip + booth_neg_table]
+	vpshufb      xmm2, xmm8, xmm6
+	vpshufb      xmm3, xmm8, xmm7
+	vpshufb      xmm8, xmm9, xmm6
+	vpshufb      xmm9, xmm9, xmm7
+	vpshufb      xmm6, xmm10, xmm6
+	vpshufb      xmm7, xmm10, xmm7
+	vpand        xmm2, xmm2, xmm4
+	vpand        xmm3, xmm3, xmm5
+	vpaddb       xmm4, xmm4, xmm2                          // xmm4 = 1526 booth
+	vpaddb       xmm5, xmm5, xmm3                          // xmm5 = 0734 booth
+	vpternlogd   xmm4, xmm6, xmm8, 0x28                    // xmm4 = apply neg and zero to 1526
+	vpternlogd   xmm5, xmm7, xmm9, 0x28                    // xmm5 = apply neg and zero to 0734
+	vpsrld       xmm3, xmm5, 16                            // xmm3 = 34xx
+	vpandd       xmm2, xmm4, [rip + mask_f0ffw]{1to4}      // xmm2 = 1526 with low bits masked out
+	vpsrld       xmm8, xmm2, 16                            // xmm8 = 26xx
+	CSA_AVX512   a=xmm3, b=xmm2, c=xmm8, tmp=xmm9, addop=vpaddb
+	vpandd       xmm5, xmm5, [rip + mask_c0ff]{1to4}       // xmm5 = mask unwanted bits from 07
+	vpbroadcastd xmm9, [rip + mask_10000400]
+	vpand        xmm6, xmm9, xmm6                          // xmm6 = b5.negate, b6.negate
+	vpand        xmm8, xmm9, xmm4                          // xmm8 = b5.data & 0x400
+	vpaddb       xmm8, xmm8, xmm6
+	vpternlogd   xmm5, xmm8, [rip + mask_c0ff]{1to4}, 0xec // b7.data |= (b5.data & 0x400) + b5.negate
+	vpandd       xmm4, xmm4, [rip + mask_800 ]{1to4}       // xmm4 = b5.data & 0x800
+	vpsrld       xmm6, xmm6, 16                            // xmm6 = b6.negate
+	vpternlogd   xmm2, xmm4, xmm6, 0xfe                    // t1.hi |= b6.negate | (b5.data & 0x800)
+	CSA_AVX512   a=xmm3, b=xmm2, c=xmm5, tmp=xmm4, addop=vpaddb
+	vpsllw       xmm8, xmm4, 9                             // xmm8 = t2.hi
+	vpsllw       xmm5, xmm3, 8                             // xmm5 = t2.lo
+	CSA_AVX512   a=xmm3, b=xmm2, c=xmm8, tmp=xmm4, addop=vpaddb
+	CSA_AVX512   a=xmm3, b=xmm2, c=xmm5, tmp=xmm4, addop=vpaddb
+	vpandd       xmm7, xmm7, [rip + mask_4000]{1to4}       // xmm7 = b7.negate
+	vpaddb       xmm2, xmm2, xmm7                          // t5.hi += b7.negate
+	vpxor        xmm2, xmm3, xmm2                          // xmm2 = ps2lo = t5.lo ^ t5.hi
+
+	vpbroadcastd xmm4, [rip + mask_mantissa]
+	vpbroadcastd xmm7, [rip + const_exp_1]
+	vmovdqa      xmm5, xmm4
+	vpternlogd   xmm4, xmm0, xmm7, 0xea                    // xmm4 = mantissa(a)
+	vpternlogd   xmm5, xmm1, xmm7, 0xea                    // xmm5 = mantissa(b)
+	vpshufd      xmm3, xmm4, 0xf5
+	vpmuludq     xmm4, xmm4, xmm5                          // xmm4 = [l] mantissa(a) * mantissa(b)
+	vpshufd      xmm5, xmm5, 0xf5
+	vpmuludq     xmm5, xmm5, xmm3                          // xmm5 = [h] mantissa(a) * mantissa(b)
+	vpshufd      xmm3, xmm5, 0xa0
+	vpblendw     xmm3, xmm3, xmm4, 0x33                    // xmm3 = mullo(mantissa(a), mantisssa(b))
+	vpsrlq       xmm4, xmm4, 16
+	vpsllq       xmm5, xmm5, 16
+	vpblendw     xmm4, xmm4, xmm5, 0xcc                    // xmm4 = (mantissa(a) * mantissa(b)) >> 16
+	vpternlogd   xmm3, xmm2, [rip + mask_8000]{1to4}, 0x08 // xmm3 = (~(a * b) & ps2lo) & 0x8000
+	vpsrld       xmm3, xmm3, 15
+	vpsubd       xmm4, xmm4, xmm3                          // xmm4 = ps2mulmantissa(a, b) >> 16
+
+	vpbroadcastd xmm3, [rip + mask_exponent]
+	vpand        xmm2, xmm3, xmm0                          // xmm2 = exponent(a)
+	vpand        xmm3, xmm3, xmm1                          // xmm3 = exponent(b)
+	vpbroadcastd xmm5, [rip + mask_rest]
+	vpternlogd   xmm0, xmm1, xmm5, 0x14                    // xmm0 = sign = (a ^ b) & 0x80000000
+	vpxor        xmm1, xmm1, xmm1
+	// kmasks save instructions but the latency on compares that write them is 3 cycles (on both AMD and Intel)...
+	// uica thinks an fmadd loop using kmasks is 0.5 cycles slower than the ternlog implementation (40 vs 40.5 for ICL/RKL),
+	// but it's close enough that I want to keep both around for real world testing later.
+#if 1
+	vpcmpeqd     xmm6, xmm1, xmm2
+	vpcmpeqd     xmm1, xmm1, xmm3
+	vpor         xmm1, xmm1, xmm6                          // xmm1 = exponent(a) == 0 || exponent(b) == 0
+
+	vpaddd       xmm2, xmm2, xmm3                          // xmm2 = exponent(a) + exponent(b)
+	vpsrld       xmm6, xmm4, 8
+	vpand        xmm9, xmm7, xmm6
+	vpsrld       xmm3, xmm4, 7
+	vblendvps    xmm4, xmm3, xmm6, xmm4                    // if (a * b > 0xffffff) mc >>= 1
+	vpandd       xmm4, xmm4, [rip + mask_mantissa]{1to4}   // xmm4 = mantissa(c)
+	vpbroadcastd xmm6, [rip + const_exp_n127]
+	vpaddd       xmm2, xmm2, xmm6                          // xmm2 = exponent(a) + exponent(b) - 127
+	vpaddd       xmm2, xmm9, xmm2                          // if (a * b > 0xffffff) xmm2 += 1
+	vpcmpgtd     xmm3, xmm6, xmm2                          // xmm3 = overflow ? ~0 : 0
+	vpandn       xmm3, xmm1, xmm3                          // xmm3 = overflow && no zero exponent ? ~0 : 0
+	vpternlogd   xmm5, xmm3, xmm0, 0xea                    // if (overflow && no zero exponent) output |= 0x7fffffff
+
+	vpcmpgtd     xmm7, xmm7, xmm2                          // xmm7 = exponent(c) overflowed or underflowed
+	vpor         xmm1, xmm1, xmm7                          // xmm1 = any special case
+	vpternlogd   xmm0, xmm2, xmm4, 0xfe                    // xmm0 = mantissa(c) | exponent(c) | sign(c)
+	vpternlogd   xmm0, xmm5, xmm1, 0xd8                    // xmm0 = special case ? xmm0 : xmm4
+#else
+	vpcmpd       k1,     xmm1, xmm2, 4                     // k1   = exponent(a) != 0
+	vpcmpd       k1{k1}, xmm1, xmm3, 4                     // k1   = exponent(b) != 0 && exponent(b) != 0
+
+	vpaddd       xmm2, xmm2, xmm3                          // xmm2 = exponent(a) + exponent(b)
+	vpsrld       xmm6, xmm4, 8
+	vpand        xmm9, xmm7, xmm6
+	vpsrld       xmm3, xmm4, 7
+	vblendvps    xmm4, xmm3, xmm6, xmm4                    // if (a * b > 0xffffff) mc >>= 1
+	vpandd       xmm4, xmm4, [rip + mask_mantissa]{1to4}   // xmm4 = mantissa(c)
+	vpbroadcastd xmm6, [rip + const_exp_n127]
+	vpaddd       xmm2, xmm2, xmm6                          // xmm2 = exponent(a) + exponent(b) - 127
+	vpaddd       xmm2, xmm9, xmm2                          // if (a * b > 0xffffff) xmm2 += 1
+	vpcmpgtd     k2{k1}, xmm6, xmm2                        // k2   = overflow && no zero exponent ? ~0 : 0
+	vpord        xmm0{k2}, xmm0, xmm5                      // if (overflow && no zero exponent) output |= 0x7fffffff
+
+	vpcmpd       k1{k1}, xmm2, xmm7, 5                     // k1   = no special case
+	vpor         xmm2, xmm2, xmm4                          // xmm2 = mantissa(c) | exponent(c)
+	vpord        xmm0{k1}, xmm0, xmm2                      // if (no special case) output |= mantissa(c) | exponent(c)
+#endif
+	ret
+
 .data
 .balign 64
 one_pos:
@@ -1079,6 +1201,8 @@ mask_c0ff:
 .int 0xc0ff
 mask_4000:
 .int 0x4000
+mask_b_0734: // 0 needs the bottom bit masked off, since it's some other bit brought in by multishift
+.byte 6, 7, 7, 7
 
 .balign 8
 booth_2x_table:
@@ -1087,6 +1211,14 @@ booth_neg_table:
 .byte 0,  0,  0,  0, -1, -1, -1, 0
 booth_zero_table:
 .byte 0, -1, -1, -1, -1, -1, -1, 0
+mshift_b_0734:
+.byte 63, 13,  5,  7, 31, 45, 37, 39
+mshift_b_1526:
+.byte  1,  9,  3, 11, 33, 41, 35, 43
+mshift_a_0734:
+.byte  8, 58,  2,  0, 40, 26, 34, 32
+mshift_a_1526:
+.byte  6, 62,  4, 60, 38, 30, 36, 28
 
 .balign 16
 dup_16_to_32_shuf:
