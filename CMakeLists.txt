@@ -20,3 +20,16 @@ add_executable(ps2float-tests
 )
 target_link_libraries(ps2float-tests PRIVATE ps2float)
 target_compile_features(ps2float-tests PRIVATE cxx_std_20)
+
+if (APPLE)
+	find_library(METAL Metal)
+	find_library(FOUNDATION Foundation)
+	add_executable(ps2float-divtest-metal test-div-metal.mm)
+	target_link_libraries(ps2float-divtest-metal PRIVATE ${METAL} ${FOUNDATION})
+	target_compile_options(ps2float-divtest-metal PRIVATE -fobjc-arc)
+	target_link_options(ps2float-divtest-metal PRIVATE -fobjc-arc)
+	target_compile_features(ps2float-divtest-metal PRIVATE cxx_std_11)
+	target_compile_definitions(ps2float-divtest-metal PRIVATE "DIV_SQRT_FILE_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/ps2divsqrt.cpp\"")
+	# We incbin ps2divsqrt.cpp, which isn't picked up by cmake
+	set_property(SOURCE test-div-metal.mm APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ps2divsqrt.cpp")
+endif()

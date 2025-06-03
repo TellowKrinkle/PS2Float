@@ -1,5 +1,12 @@
 #include "ps2float.h"
 
+// Uncomment to force unroll division loop
+// #define CONSTLOOP _Pragma("unroll")
+
+#ifndef CONSTLOOP
+#define CONSTLOOP
+#endif
+
 typedef uint32_t u32;
 typedef  int32_t s32;
 
@@ -35,6 +42,7 @@ u32 ps2div(u32 a, u32 b) {
 	CSAResult current = { am, 0 };
 	u32 quotient = 0;
 	int quotientBit = 1;
+	CONSTLOOP
 	for (int i = 0; i < 25; i++) {
 		quotient = (quotient << 1) + quotientBit;
 		u32 add = quotientBit > 0 ? ~bm : quotientBit < 0 ? bm : 0;
@@ -65,6 +73,7 @@ u32 ps2sqrt(u32 val) {
 	CSAResult current = { m, 0 };
 	u32 quotient = 0;
 	int quotientBit = 1;
+	CONSTLOOP
 	for (int i = 0; i < 25; i++) {
 		// Adding n to quotient adds n * (2*quotient + n) to quotient^2
 		// (which is what we need to subtract from the remainder)
