@@ -283,6 +283,8 @@ static bool test_div(TestList tests, bool print) {
 #ifdef __x86_64__
 	if (test_asm)
 		ok &= run_tests(ps2div_asm, tests, "/", "Div ASM", print, false);
+	if (test_avx)
+		ok &= run_tests(ps2div_one_avx, tests, "/", "Div One AVX", print);
 #endif
 	return ok;
 }

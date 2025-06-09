@@ -179,4 +179,170 @@ GNAME(ps2div_asm):
 	cmovl eax, edx
 	jmp   1b
 
+// Prepares the test variable for quotient select
+// c0 and s0 are the carry+sum and sum from the previous iteration
+// c1 and s1 are the carry+sum and sum from the current iteration
+// qnz is a mask indicating if the previous quotient bit was nonzero
+// km is a register containing 0xff000000
+// The result is placed in c0, and s0 is destroyed.
+.macro QSEL1_AVX c1, s1, c0, s0, qnz, km
+	vpblendvb \s0, \s0, \s1, \qnz
+	vpblendvb \c0, \c0, \c1, \qnz
+	vpandn    \s0, \km, \s0
+	vpsubd    \c0, \c0, \s0
+	vpor      \c0, \c0, \s0
+.endm
+
+// Calculates the next quotient bit and the associated dividend adjustment
+// c0 is the previous iteration's carry+sum, which will have the negation bit added to it
+// bp is the mantissa of the divisor
+// qv is the output quotient bit and qn is an output value indicating whether qv is nonzero
+// t0 is a temporary register
+// kp is a register containing 0x007fffff (positive compare value)
+// kn is a register containing 0xff000000 (negative compare value)
+// c1 should contain the output of a previous QSEL1
+// s1 will be filled with the dividend adjustment value
+.macro QSEL2_AVX c1, s1, c0, bp, kp, kn, qv, qn, t0
+	vpcmpgtd \t0, \c1, \kp // t0 = quotientBit == 1
+	vpcmpgtd \qv, \kn, \c1 // qv = quotiontBit == -1
+	vpor     \qn, \t0, \qv // qn = quotientBit != 0
+	vpxor    \s1, \bp, \t0 // s1 = quotientBit == 1 ? ~bm : bm
+	vpand    \s1, \qn, \s1 // s1 = add
+	vpsubd   \c0, \c0, \t0 // c0 += quotientBit == 1
+	vpsubd   \qv, \qv, \t0 // qv = quotientBit
+.endm
+
+// Calculate a carry-save addition
+// c0 and s0 are the incoming carry+sum and sum
+// c1 and s1 are the outgoing carry+sum and sum
+// t0 is a temporary register
+// The third value for the CSA should be placed in s1
+.macro CSA_LINK_AVX c1, s1, c0, s0, t0
+	vpsubd \t0, \c0, \s0
+	vpxor  \t0, \t0, \s0
+	vpaddd \c1, \s1, \c0
+	vpxor  \s1, \s1, \t0
+.endm
+
+.balign 16
+.globl GNAME(ps2div_one_avx)
+GNAME(ps2div_one_avx):
+	vbroadcastss xmm7, [rip + mask_mantissa]
+	vbroadcastss xmm2, [rip + const_exp_1]
+	vmovd        ecx, xmm0
+	vmovd        edx, xmm1
+	vpand        xmm0, xmm0, xmm7
+	vpand        xmm1, xmm1, xmm7
+	vpor         xmm0, xmm0, xmm2
+	vpor         xmm1, xmm1, xmm2
+	vpslld       xmm0, xmm0, 2
+	vpslld       xmm9, xmm1, 2
+	vbroadcastss xmm8, [rip + mask_ff000000]
+
+	// CSA_LINK_AVX
+	vbroadcastss xmm3, [rip + const_1]
+	vpaddd       xmm3, xmm3, xmm0
+	vpcmpeqd     xmm1, xmm1, xmm1
+	vpxor        xmm1, xmm9, xmm1
+	vpxor        xmm2, xmm1, xmm3
+	vpaddd       xmm3, xmm3, xmm1
+
+	// QSEL1_AVX
+	vpandn       xmm0, xmm8, xmm2
+	vpsubd       xmm1, xmm3, xmm0
+	vpor         xmm1, xmm1, xmm0
+
+	vpaddd       xmm2, xmm2, xmm2 // current.sum <<= 1
+	vpaddd       xmm3, xmm3, xmm3 // current.carry <<= 1
+
+	// QSEL2_AVX, known output 0 or 1
+	vpcmpgtd     xmm5, xmm1, xmm7 // xmm5 = -quotientBit
+	vpsubd       xmm3, xmm3, xmm5 // xmm3 += quotientBit == 1
+	vpandn       xmm0, xmm9, xmm5 // xmm0 = add
+
+	CSA_LINK_AVX c1=xmm1, s1=xmm0, c0=xmm3, s0=xmm2, t0=xmm4
+	QSEL1_AVX    c1=xmm1, s1=xmm0, c0=xmm3, s0=xmm2, qnz=xmm5, km=xmm8
+
+	vbroadcastss xmm6, [rip + const_2]
+	vpsubd       xmm6, xmm6, xmm5 // quotient = (1 << 1) + quotientBit
+	mov          esi, 11
+0:
+	vpaddd       xmm0, xmm0, xmm0 // current.sum <<= 1
+	vpaddd       xmm1, xmm1, xmm1 // current.carry <<= 1
+	QSEL2_AVX    c1=xmm3, s1=xmm2, c0=xmm1, bp=xmm9, kp=xmm7, kn=xmm8, qv=xmm5, qn=xmm10, t0=xmm4
+	vpaddd       xmm6, xmm6, xmm6 // quotient = quotient << 1
+	vpaddd       xmm6, xmm6, xmm5 // quotient += quotientBit
+	CSA_LINK_AVX c1=xmm3, s1=xmm2, c0=xmm1, s0=xmm0, t0=xmm4
+	QSEL1_AVX    c1=xmm3, s1=xmm2, c0=xmm1, s0=xmm0, qnz=xmm10, km=xmm8
+
+	vpaddd       xmm2, xmm2, xmm2 // current.sum <<= 1
+	vpaddd       xmm3, xmm3, xmm3 // current.carry <<= 1
+	QSEL2_AVX    c1=xmm1, s1=xmm0, c0=xmm3, bp=xmm9, kp=xmm7, kn=xmm8, qv=xmm5, qn=xmm10, t0=xmm4
+	vpaddd       xmm6, xmm6, xmm6 // quotient = quotient << 1
+	vpaddd       xmm6, xmm6, xmm5 // quotient += quotientBit
+	CSA_LINK_AVX c1=xmm1, s1=xmm0, c0=xmm3, s0=xmm2, t0=xmm4
+	QSEL1_AVX    c1=xmm1, s1=xmm0, c0=xmm3, s0=xmm2, qnz=xmm10, km=xmm8
+
+	dec          esi
+	jnz          0b
+
+	vpcmpgtd     xmm1, xmm3, xmm7
+	vpcmpgtd     xmm0, xmm8, xmm3
+	vpsubd       xmm0, xmm0, xmm1
+	vpaddd       xmm6, xmm6, xmm6
+	vpaddd       xmm6, xmm6, xmm0
+	vmovd        esi,  xmm6
+
+	mov          eax, ecx
+	xor          eax, edx
+	and          eax, 0x80000000
+
+	and          edx, 0x7f800000
+	jz           2f
+	and          ecx, 0x7f800000
+	jz           1f
+	sub          ecx, edx
+	add          ecx, 126 << 23
+
+	lea          edx, [rcx + (1 << 23)]
+	mov          edi, esi
+	shr          edi, 1
+	cmp          esi, 1 << 24
+	cmovb        edx, ecx
+	cmovb        edi, esi
+	test         edx, edx
+	jle          3f
+
+	or           eax, edx
+	and          edi, 0x7fffff
+	or           eax, edi
+
+1:
+	vmovd        xmm0, eax
+	vbroadcastss xmm0, xmm0
+	ret
+
+2: // Div 0
+	or    eax, 0x7fffffff
+	jmp   1b
+
+3: // Overflow / Underflow
+	mov   ecx, eax
+	or    ecx, 0x7fffffff
+	cmp   edx, -128 << 23
+	cmovl eax, ecx
+	jmp   1b
+
+.data
+.balign 64
+mask_ff000000:
+.int 0xff000000
+mask_mantissa:
+.int 0x7fffff
+const_1:
+.int 1
+const_2:
+.int 2
+const_exp_1:
+.int 1 << 23
 #endif // __x86_64__
