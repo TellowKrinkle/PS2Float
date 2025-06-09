@@ -280,6 +280,10 @@ static bool test_div(TestList tests, bool print) {
 	bool ok = true;
 	if (test_c)
 		ok &= run_tests(ps2div, tests, "/", "Div C", print, print);
+#ifdef __x86_64__
+	if (test_asm)
+		ok &= run_tests(ps2div_asm, tests, "/", "Div ASM", print, false);
+#endif
 	return ok;
 }
 
